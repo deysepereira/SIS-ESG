@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SISTEMA SIS-ESG | Registro de Demandas</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel para JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; }
+        .audit-trail { font-family: 'Courier New', monospace; }
+        
+        /* Animação de Fundo para o Login */
+        .login-bg {
+            background-color: #0f172a;
+            background-image: 
+                radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
+                radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), 
+                radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%);
+        }
+        
+        @keyframes fade-in-up {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up {
+            animation: fade-in-up 0.5s ease-out forwards;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        // --- Componente de Ícone Seguro (Correção do Bug removeChild) ---
+        // Em vez de usar createIcons() que substitui o nó do React, usamos createElement e anexamos a um ref.
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const ref = useRef(null);
+
+            useEffect(() => {
+                if (window.lucide && ref.current) {
+                    // Converter kebab-case (ex: layout-dashboard) para PascalCase (LayoutDashboard) para acessar a lib
+                    const pascalName = name.replace(/(^\w|-\w)/g, (clear) => clear.replace('-', '').toUpperCase());
+                    
+                    const iconDef = window.lucide.icons ? window.lucide.icons[pascalName] : null;
+                    
+                    if (iconDef) {
+                        const svg = window.lucide.createElement(iconDef);
+                        svg.setAttribute('width', size);
+                        svg.setAttribute('height', size);
+                        // Combina classes do Tailwind com o SVG
+                        if (className) svg.setAttribute('class', className);
+                        
+                        ref.current.innerHTML = '';
+                        ref.current.appendChild(svg);
+                    } else {
+                         // Fallback visual caso o nome do ícone não bata exatamente
+                         console.warn(`Ícone não encontrado: ${name} -> ${pascalName}`);
+                    }
+                }
+            }, [name, size, className]);
+
+            return <span ref={ref} style={{ display: 'inline-flex', verticalAlign: 'middle' }}></span>;
+        };
+
+        // --- Utilitário de Formatação de Moeda ---
+        const formatCurrency = (value) => {
+            return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
+        };
+
+        // --- Mock Inicial de Dados ---
+        const initialData = [
+            {
+                id: 1,
+                refNumber: "OF-2024/001",
+                entryDate: "2024-02-10",
+                initialAssessment: "Solicitação de reparo em área de preservação permanente.",
+                technicalOpinion: "Viável, necessita licença simplificada.",
+                department: "Engenharia Ambiental",
+                status: "Em execução",
+                assignee: "Carlos Silva",
+                deadline: "2024-05-15",
+                value: 15400.50, // Valor Solicitado
+                approvedValue: 12000.00, // Valor Aprovado
+                finalDecision: "Aprovado com ressalvas",
+                notes: "Aguardando compra de materiais.",
+                files: ["licenca_prev.pdf"],
+                auditTrail: [
+                    { date: "2024-02-10 10:00", user: "Admin", action: "Criação do Registro" },
+                    { date: "2024-02-12 14:30", user: "Gerente", action: "Status alterado para Em execução" }
+                ]
+            }
+        ];
+
+        // --- Componente de Login ---
+        const LoginScreen = ({ onLogin }) => {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [showPassword, setShowPassword] = useState(false); // Novo estado para visibilidade
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+            
+            // Estados para Recuperação de Senha
+            const [viewState, setViewState] = useState('login'); // 'login' | 'reset'
+            const [resetEmail, setResetEmail] = useState('');
+            const [resetStatus, setResetStatus] = useState('idle'); // 'idle' | 'loading' | 'success'
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setError('');
+                
+                // Simulação de delay de rede
+                setTimeout(() => {
+                    if (email && password) {
+                        onLogin({ email, name: email.split('@')[0] });
+                    } else {
+                        setError('Por favor, preencha todos os campos.');
+                        setLoading(false);
+                    }
+                }, 800);
+            };
+
+            const handleResetSubmit = (e) => {
+                e.preventDefault();
+                if (!resetEmail) {
+                    setError('Por favor, informe seu e-mail.');
+                    return;
+                }
+                
+                setResetStatus('loading');
+                setError('');
+
+                // Simulação de envio de email
+                setTimeout(() => {
+                    setResetStatus('success');
+                }, 1500);
+            };
+
+            // Renderização da Tela de Recuperação
+            if (viewState === 'reset') {
+                return (
+                    <div className="min-h-screen login-bg flex items-center justify-center p-4">
+                        <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-fade-in-up">
+                            <div className="p-8 text-center border-b border-slate-100">
+                                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-100 mb-4 text-blue-600">
+                                    <Icon name="key-round" size={32} />
+                                </div>
+                                <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Recuperar Senha</h1>
+                                <p className="text-sm text-slate-500 mt-1">Enviaremos as instruções para o seu e-mail.</p>
+                            </div>
+
+                            <div className="p-8">
+                                {resetStatus === 'success' ? (
+                                    <div className="text-center space-y-4 animate-fade-in">
+                                        <div className="bg-emerald-50 text-emerald-700 p-4 rounded-lg flex flex-col items-center gap-2">
+                                            <Icon name="check-circle" size={32} />
+                                            <span className="font-semibold">E-mail enviado com sucesso!</span>
+                                        </div>
+                                        <p className="text-sm text-slate-600">
+                                            Verifique sua caixa de entrada (e spam) no endereço <strong>{resetEmail}</strong> para redefinir sua senha.
+                                        </p>
+                                        <button 
+                                            onClick={() => { setViewState('login'); setResetStatus('idle'); setResetEmail(''); }}
+                                            className="w-full bg-slate-900 text-white font-semibold py-3 rounded-lg hover:bg-slate-800 transition"
+                                        >
+                                            Voltar para Login
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <form onSubmit={handleResetSubmit} className="space-y-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">E-mail Cadastrado</label>
+                                            <div className="relative">
+                                                <div className="absolute left-3 top-3 text-slate-400 pointer-events-none">
+                                                    <Icon name="mail" size={18} />
+                                                </div>
+                                                <input 
+                                                    type="email" 
+                                                    value={resetEmail}
+                                                    onChange={(e) => setResetEmail(e.target.value)}
+                                                    className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition" 
+                                                    placeholder="seu.email@instituto.org"
+                                                    required
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <button 
+                                            type="submit" 
+                                            disabled={resetStatus === 'loading'}
+                                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg shadow-lg hover:shadow-xl transition flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                                        >
+                                            {resetStatus === 'loading' ? (
+                                                <>
+                                                    <Icon name="loader-2" className="animate-spin" /> Enviando...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    Enviar Link de Redefinição
+                                                </>
+                                            )}
+                                        </button>
+
+                                        <button 
+                                            type="button"
+                                            onClick={() => { setViewState('login'); setError(''); }}
+                                            className="w-full text-slate-500 hover:text-slate-700 font-medium py-2 text-sm flex items-center justify-center gap-1"
+                                        >
+                                            <Icon name="arrow-left" size={16} /> Voltar para Login
+                                        </button>
+                                    </form>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // Renderização da Tela de Login (Padrão)
+            return (
+                <div className="min-h-screen login-bg flex items-center justify-center p-4">
+                    <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-fade-in-up">
+                        <div className="p-8 pb-6 text-center border-b border-slate-100">
+                            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-100 mb-4 text-emerald-600">
+                                <Icon name="leaf" size={32} />
+                            </div>
+                            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">SIS-ESG</h1>
+                            <p className="text-sm text-slate-500 mt-1">Sistema de Gestão Socioambiental</p>
+                        </div>
+
+                        <div className="p-8 pt-6">
+                            <form onSubmit={handleSubmit} className="space-y-4">
+                                {error && (
+                                    <div className="bg-red-50 text-red-600 p-3 rounded text-sm flex items-center gap-2">
+                                        <Icon name="alert-circle" size={16} /> {error}
+                                    </div>
+                                )}
+                                
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">E-mail Corporativo</label>
+                                    <div className="relative">
+                                        <div className="absolute left-3 top-3 text-slate-400 pointer-events-none">
+                                            <Icon name="mail" size={18} />
+                                        </div>
+                                        <input 
+                                            type="email" 
+                                            value={email}
+                                            onChange={(e) => setEmail(e.target.value)}
+                                            className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition" 
+                                            placeholder="seu.nome@instituto.org"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Senha</label>
+                                    <div className="relative">
+                                        <div className="absolute left-3 top-3 text-slate-400 pointer-events-none">
+                                            <Icon name="lock" size={18} />
+                                        </div>
+                                        <input 
+                                            type={showPassword ? "text" : "password"} 
+                                            value={password}
+                                            onChange={(e) => setPassword(e.target.value)}
+                                            className="w-full pl-10 pr-12 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition" 
+                                            placeholder="••••••••"
+                                        />
+                                        <button 
+                                            type="button"
+                                            onClick={() => setShowPassword(!showPassword)}
+                                            className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 focus:outline-none"
+                                            title={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                                        >
+                                            <Icon name={showPassword ? "eye-off" : "eye"} size={18} />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center justify-between text-sm">
+                                    <label className="flex items-center gap-2 text-slate-600 cursor-pointer">
+                                        <input type="checkbox" className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
+                                        Lembrar-me
+                                    </label>
+                                    <button 
+                                        type="button"
+                                        onClick={() => { setViewState('reset'); setError(''); }}
+                                        className="text-emerald-600 hover:text-emerald-700 font-medium"
+                                    >
+                                        Esqueceu a senha?
+                                    </button>
+                                </div>
+
+                                <button 
+                                    type="submit" 
+                                    disabled={loading}
+                                    className="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-3 rounded-lg shadow-lg hover:shadow-xl transition flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                                >
+                                    {loading ? (
+                                        <>
+                                            <Icon name="loader-2" className="animate-spin" /> Autenticando...
+                                        </>
+                                    ) : (
+                                        <>
+                                            Entrar no Sistema <Icon name="arrow-right" size={18} />
+                                        </>
+                                    )}
+                                </button>
+                            </form>
+
+                            <div className="mt-6 text-center">
+                                <p className="text-xs text-slate-400">
+                                    Ambiente Seguro • Compliance ISO 9001
+                                </p>
+                            </div>
+                        </div>
+                        <div className="bg-slate-50 p-4 text-center border-t border-slate-100">
+                             <button 
+                                onClick={() => onLogin({ name: 'Visitante', email: 'demo@sis-esg.com' })}
+                                className="text-sm text-slate-500 hover:text-emerald-600 transition underline"
+                             >
+                                Acessar Versão Demo (Sem Senha)
+                             </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Componente Principal ---
+        const App = () => {
+            const [user, setUser] = useState(null); // Estado de Autenticação
+            const [view, setView] = useState('dashboard'); // dashboard, list, form, detail
+            const [mobileMenuOpen, setMobileMenuOpen] = useState(false); // Estado para menu mobile
+            const [demands, setDemands] = useState(() => {
+                const saved = localStorage.getItem('esg_demands');
+                return saved ? JSON.parse(saved) : initialData;
+            });
+            const [currentDemand, setCurrentDemand] = useState(null);
+            const [filterStatus, setFilterStatus] = useState('Todos');
+            const [searchTerm, setSearchTerm] = useState('');
+
+            // Persistência
+            useEffect(() => {
+                localStorage.setItem('esg_demands', JSON.stringify(demands));
+            }, [demands]);
+
+            // --- Lógica de Negócio ---
+
+            const handleLogin = (userData) => {
+                setUser(userData);
+            };
+
+            const handleLogout = () => {
+                setUser(null);
+                setView('dashboard');
+            };
+
+            const handleSave = (demand) => {
+                const now = new Date().toLocaleString('pt-BR');
+                // Assegurar que os valores sejam numéricos
+                const demandToSave = { 
+                    ...demand, 
+                    value: parseFloat(demand.value) || 0,
+                    approvedValue: parseFloat(demand.approvedValue) || 0 
+                };
+
+                const currentUser = user ? user.name : "Sistema";
+
+                if (demand.id) {
+                    // Edição
+                    const updatedDemands = demands.map(d => {
+                        if (d.id === demand.id) {
+                            // Adicionar log de auditoria
+                            const newTrail = [...d.auditTrail, { date: now, user: currentUser, action: "Atualização de registro" }];
+                            return { ...demandToSave, auditTrail: newTrail };
+                        }
+                        return d;
+                    });
+                    setDemands(updatedDemands);
+                } else {
+                    // Novo
+                    const newDemand = {
+                        ...demandToSave,
+                        id: Date.now(),
+                        auditTrail: [{ date: now, user: currentUser, action: "Criação do Registro" }],
+                        files: []
+                    };
+                    setDemands([...demands, newDemand]);
+                }
+                setView('list');
+            };
+
+            // Função auxiliar para navegar e fechar menu mobile
+            const navigateTo = (newView) => {
+                setView(newView);
+                setMobileMenuOpen(false);
+                if (newView === 'form') setCurrentDemand(null);
+            };
+
+            const handleDelete = (id) => {
+                if(confirm("Confirma a exclusão? Isso afetará a trilha de auditoria.")) {
+                    setDemands(demands.filter(d => d.id !== id));
+                    setView('list');
+                }
+            };
+
+            const exportCSV = () => {
+                const headers = ["ID", "Ofício", "Data", "Status", "Valor Solicitado (R$)", "Valor Aprovado (R$)", "Responsável", "Departamento"];
+                const rows = demands.map(d => [d.id, d.refNumber, d.entryDate, d.status, d.value, d.approvedValue, d.assignee, d.department].join(","));
+                const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
+                const encodedUri = encodeURI(csvContent);
+                const link = document.createElement("a");
+                link.setAttribute("href", encodedUri);
+                link.setAttribute("download", "relatorio_demandas_esg.csv");
+                document.body.appendChild(link);
+                link.click();
+            };
+
+            // --- Telas ---
+
+            const Dashboard = () => {
+                const stats = {
+                    total: demands.length,
+                    pending: demands.filter(d => d.status === 'Pendente').length,
+                    executing: demands.filter(d => d.status === 'Em execução').length,
+                    completed: demands.filter(d => d.status === 'Concluída').length,
+                    totalRequested: demands.reduce((acc, curr) => acc + (parseFloat(curr.value) || 0), 0),
+                    totalApproved: demands.reduce((acc, curr) => acc + (parseFloat(curr.approvedValue) || 0), 0)
+                };
+
+                return (
+                    <div className="space-y-6 animate-fade-in">
+                        <div className="flex justify-between items-end">
+                            <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                                <Icon name="layout-dashboard" /> Painel de Controle
+                            </h2>
+                            <span className="text-sm text-slate-500">Olá, <span className="font-semibold text-slate-700">{user?.name}</span></span>
+                        </div>
+                        
+                        {/* KPI Cards */}
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            {/* Card de Valor Financeiro Solicitado */}
+                            <div className="bg-slate-800 text-white p-6 rounded-lg shadow-sm border-l-4 border-emerald-400 col-span-1 md:col-span-2">
+                                <p className="text-xs text-emerald-200 font-semibold uppercase tracking-wider mb-1">Total Solicitado</p>
+                                <p className="text-3xl font-bold flex items-center gap-2">
+                                    <Icon name="dollar-sign" size={24} className="text-emerald-400"/>
+                                    {formatCurrency(stats.totalRequested)}
+                                </p>
+                            </div>
+                            
+                            {/* Card de Valor Financeiro Aprovado */}
+                            <div className="bg-emerald-800 text-white p-6 rounded-lg shadow-sm border-l-4 border-white col-span-1 md:col-span-2">
+                                <p className="text-xs text-emerald-100 font-semibold uppercase tracking-wider mb-1">Total Aprovado</p>
+                                <p className="text-3xl font-bold flex items-center gap-2">
+                                    <Icon name="check-circle" size={24} className="text-emerald-200"/>
+                                    {formatCurrency(stats.totalApproved)}
+                                </p>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-lg shadow-sm border-l-4 border-blue-500">
+                                <p className="text-xs text-slate-500 font-semibold uppercase">Total de Demandas</p>
+                                <p className="text-3xl font-bold text-slate-800">{stats.total}</p>
+                            </div>
+                            <div className="bg-white p-6 rounded-lg shadow-sm border-l-4 border-purple-500">
+                                <p className="text-xs text-slate-500 font-semibold uppercase">Em Execução</p>
+                                <p className="text-3xl font-bold text-slate-800">{stats.executing}</p>
+                            </div>
+                            <div className="bg-white p-6 rounded-lg shadow-sm border-l-4 border-emerald-500">
+                                <p className="text-xs text-slate-500 font-semibold uppercase">Concluídas</p>
+                                <p className="text-3xl font-bold text-slate-800">{stats.completed}</p>
+                            </div>
+                            <div className="bg-white p-6 rounded-lg shadow-sm border-l-4 border-yellow-500">
+                                <p className="text-xs text-slate-500 font-semibold uppercase">Pendentes</p>
+                                <p className="text-3xl font-bold text-slate-800">{stats.pending}</p>
+                            </div>
+                        </div>
+
+                        <div className="bg-white p-6 rounded-lg shadow-sm">
+                            <h3 className="text-lg font-semibold mb-4 text-slate-700">Ações Rápidas</h3>
+                            <div className="flex gap-4">
+                                <button onClick={() => { setCurrentDemand(null); setView('form'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded flex items-center gap-2">
+                                    <Icon name="plus-circle" size={18} /> Nova Demanda
+                                </button>
+                                <button onClick={() => setView('list')} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded flex items-center gap-2">
+                                    <Icon name="list" size={18} /> Ver Lista Completa
+                                </button>
+                                <button onClick={exportCSV} className="bg-emerald-100 hover:bg-emerald-200 text-emerald-800 px-4 py-2 rounded flex items-center gap-2">
+                                    <Icon name="file-spreadsheet" size={18} /> Exportar Relatório
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const DemandList = () => {
+                const filtered = demands.filter(d => 
+                    (filterStatus === 'Todos' || d.status === filterStatus) &&
+                    (d.refNumber.toLowerCase().includes(searchTerm.toLowerCase()) || d.initialAssessment.toLowerCase().includes(searchTerm.toLowerCase()))
+                );
+
+                const getStatusColor = (status) => {
+                    switch(status) {
+                        case 'Pendente': return 'bg-yellow-100 text-yellow-800';
+                        case 'Em análise': return 'bg-blue-100 text-blue-800';
+                        case 'Em execução': return 'bg-purple-100 text-purple-800';
+                        case 'Concluída': return 'bg-emerald-100 text-emerald-800';
+                        case 'Indeferida': return 'bg-red-100 text-red-800';
+                        default: return 'bg-slate-100 text-slate-800';
+                    }
+                };
+
+                return (
+                    <div className="bg-white rounded-lg shadow-sm p-6">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-xl font-bold flex items-center gap-2"><Icon name="list" /> Registros</h2>
+                            <button onClick={() => { setCurrentDemand(null); setView('form'); }} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">Novo Registro</button>
+                        </div>
+
+                        <div className="flex gap-4 mb-6 flex-wrap">
+                            <div className="flex-1 relative">
+                                <div className="absolute left-3 top-2.5 text-slate-400 pointer-events-none">
+                                    <Icon name="search" size={18}/>
+                                </div>
+                                <input 
+                                    type="text" 
+                                    placeholder="Buscar por ofício ou descrição..." 
+                                    className="w-full pl-10 pr-4 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                            </div>
+                            <select 
+                                className="border p-2 rounded bg-white"
+                                value={filterStatus}
+                                onChange={(e) => setFilterStatus(e.target.value)}
+                            >
+                                <option>Todos</option>
+                                <option>Pendente</option>
+                                <option>Em análise</option>
+                                <option>Em execução</option>
+                                <option>Concluída</option>
+                                <option>Indeferida</option>
+                            </select>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left text-slate-600">
+                                <thead className="text-xs text-slate-700 uppercase bg-slate-50">
+                                    <tr>
+                                        <th className="px-4 py-3">Ofício</th>
+                                        <th className="px-4 py-3">Entrada</th>
+                                        <th className="px-4 py-3">Departamento</th>
+                                        <th className="px-4 py-3" title="Valor Aprovado">Aprovado (R$)</th>
+                                        <th className="px-4 py-3">Status</th>
+                                        <th className="px-4 py-3 text-right">Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filtered.map(d => (
+                                        <tr key={d.id} className="border-b hover:bg-slate-50 transition">
+                                            <td className="px-4 py-3 font-medium text-slate-900">{d.refNumber}</td>
+                                            <td className="px-4 py-3">{d.entryDate.split('-').reverse().join('/')}</td>
+                                            <td className="px-4 py-3">{d.department}</td>
+                                            <td className="px-4 py-3 font-mono text-emerald-700 font-medium">
+                                                {d.approvedValue ? formatCurrency(d.approvedValue) : '-'}
+                                                {d.value > 0 && d.value !== d.approvedValue && (
+                                                    <div className="text-xs text-slate-400 line-through">{formatCurrency(d.value)}</div>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(d.status)}`}>
+                                                    {d.status}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-3 text-right">
+                                                <button onClick={() => { setCurrentDemand(d); setView('form'); }} className="text-blue-600 hover:text-blue-800 mr-3" title="Editar">
+                                                    <Icon name="edit-2" size={16} />
+                                                </button>
+                                                <button onClick={() => handleDelete(d.id)} className="text-red-600 hover:text-red-800" title="Excluir">
+                                                    <Icon name="trash-2" size={16} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {filtered.length === 0 && <p className="text-center p-8 text-slate-400">Nenhum registro encontrado.</p>}
+                        </div>
+                    </div>
+                );
+            };
+
+            const DemandForm = () => {
+                const [formData, setFormData] = useState(currentDemand || {
+                    refNumber: '', entryDate: new Date().toISOString().split('T')[0],
+                    initialAssessment: '', technicalOpinion: '', department: 'Jurídico',
+                    status: 'Pendente', assignee: '', deadline: '',
+                    value: 0,
+                    approvedValue: 0,
+                    finalDecision: '', notes: '', auditTrail: []
+                });
+
+                const handleChange = (e) => {
+                    setFormData({ ...formData, [e.target.name]: e.target.value });
+                };
+
+                const handleSubmit = (e) => {
+                    e.preventDefault();
+                    handleSave(formData);
+                };
+
+                return (
+                    <div className="bg-white rounded-lg shadow-lg max-w-4xl mx-auto">
+                        <div className="border-b px-6 py-4 flex justify-between items-center bg-slate-50 rounded-t-lg">
+                            <h2 className="text-lg font-bold text-slate-800">
+                                {formData.id ? `Editar Registro: ${formData.refNumber}` : 'Nova Demanda Socioambiental'}
+                            </h2>
+                            <button onClick={() => setView('list')} className="text-slate-500 hover:text-slate-700">
+                                <Icon name="x" />
+                            </button>
+                        </div>
+                        
+                        <div className="p-6">
+                            <form onSubmit={handleSubmit} className="space-y-6">
+                                {/* Seção 1: Identificação */}
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <div className="md:col-span-1">
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Nº Ofício/Solicitação *</label>
+                                        <input required name="refNumber" value={formData.refNumber} onChange={handleChange} className="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+                                    <div className="md:col-span-1">
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Data de Entrada *</label>
+                                        <input type="date" required name="entryDate" value={formData.entryDate} onChange={handleChange} className="w-full border rounded p-2" />
+                                    </div>
+                                    <div className="md:col-span-1">
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Status *</label>
+                                        <select name="status" value={formData.status} onChange={handleChange} className="w-full border rounded p-2 bg-white">
+                                            <option>Pendente</option>
+                                            <option>Em análise</option>
+                                            <option>Em execução</option>
+                                            <option>Concluída</option>
+                                            <option>Indeferida</option>
+                                        </select>
+                                    </div>
+                                    <div className="md:col-span-1">
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Prazo / SLA</label>
+                                        <input type="date" name="deadline" value={formData.deadline} onChange={handleChange} className="w-full border rounded p-2" />
+                                    </div>
+                                </div>
+
+                                {/* Seção Financeira (Nova) */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded border border-slate-200">
+                                    <div className="md:col-span-1">
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Valor Solicitado (R$)</label>
+                                        <input type="number" step="0.01" min="0" name="value" value={formData.value} onChange={handleChange} className="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500" placeholder="0,00" />
+                                    </div>
+                                    <div className="md:col-span-1">
+                                        <label className="block text-sm font-medium text-emerald-800 mb-1 flex items-center gap-1">
+                                            <Icon name="check-circle" size={14}/> Valor Aprovado (R$)
+                                        </label>
+                                        <input type="number" step="0.01" min="0" name="approvedValue" value={formData.approvedValue} onChange={handleChange} className="w-full border rounded p-2 focus:ring-2 focus:ring-emerald-500 border-emerald-200 bg-emerald-50" placeholder="0,00" />
+                                    </div>
+                                </div>
+
+                                {/* Seção 2: Análise Técnica */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="col-span-2">
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Avaliação Inicial *</label>
+                                        <textarea required rows="2" name="initialAssessment" value={formData.initialAssessment} onChange={handleChange} className="w-full border rounded p-2" placeholder="Descrição resumida da demanda..."></textarea>
+                                    </div>
+                                    <div className="col-span-2">
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Parecer Técnico</label>
+                                        <textarea rows="3" name="technicalOpinion" value={formData.technicalOpinion} onChange={handleChange} className="w-full border rounded p-2 bg-slate-50" placeholder="Análise técnica aprofundada..."></textarea>
+                                    </div>
+                                </div>
+
+                                {/* Seção 3: Responsabilidade */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Departamento</label>
+                                        <input 
+                                            list="departments-list" 
+                                            name="department" 
+                                            value={formData.department} 
+                                            onChange={handleChange} 
+                                            className="w-full border rounded p-2 bg-white focus:ring-2 focus:ring-blue-500" 
+                                            placeholder="Selecione ou digite..." 
+                                        />
+                                        <datalist id="departments-list">
+                                            <option value="Supervisão " />
+                                            <option value="Engenharia Ambiental" />
+                                            <option value="Secretaria Executiva" />
+                                            <option value="Recursos Humanos" />
+                                            <option value="Financeiro" />
+                                        </datalist>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Responsável Designado</label>
+                                        <input name="assignee" value={formData.assignee} onChange={handleChange} className="w-full border rounded p-2" />
+                                    </div>
+                                </div>
+
+                                {/* Seção 4: Conclusão e Auditoria */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Decisão Final</label>
+                                        <input name="finalDecision" value={formData.finalDecision} onChange={handleChange} className="w-full border rounded p-2" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Anexo de Documentos</label>
+                                        <div className="border border-dashed border-slate-300 rounded p-2 text-center text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
+                                            <Icon name="upload-cloud" size={16} className="mx-auto mb-1"/>
+                                            Clique para simular upload (Visual)
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                {formData.id && (
+                                    <div className="mt-6 border-t pt-4">
+                                        <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2"><Icon name="history" size={16}/> Trilha de Auditoria (Sistema)</h3>
+                                        <div className="bg-slate-900 text-slate-200 p-3 rounded text-xs audit-trail max-h-32 overflow-y-auto">
+                                            {formData.auditTrail && formData.auditTrail.map((log, idx) => (
+                                                <div key={idx} className="mb-1 border-b border-slate-700 pb-1 last:border-0">
+                                                    <span className="text-emerald-400">[{log.date}]</span> <span className="text-yellow-400">{log.user}</span>: {log.action}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="flex justify-end gap-3 pt-4 border-t">
+                                    <button type="button" onClick={() => setView('list')} className="px-4 py-2 text-slate-700 border rounded hover:bg-slate-50">Cancelar</button>
+                                    <button type="submit" className="px-6 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700 font-medium flex items-center gap-2">
+                                        <Icon name="save" size={18} /> Salvar Registro
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                );
+            };
+
+            // --- Layout Principal (Condicional) ---
+            
+            // Se NÃO estiver logado, mostra Login
+            if (!user) {
+                return <LoginScreen onLogin={handleLogin} />;
+            }
+
+            // Se estiver logado, mostra App
+            return (
+                <div className="flex min-h-screen">
+                    {/* Sidebar Desktop */}
+                    <aside className="w-64 bg-slate-900 text-white flex flex-col hidden md:flex">
+                        <div className="p-6 border-b border-slate-800">
+                            <h1 className="text-xl font-bold text-emerald-400 tracking-wider">SIS-ESG</h1>
+                            <p className="text-xs text-slate-400 mt-1">Gestão Socioambiental</p>
+                        </div>
+                        <nav className="flex-1 p-4 space-y-2">
+                            <button onClick={() => setView('dashboard')} className={`w-full flex items-center gap-3 px-4 py-3 rounded transition ${view === 'dashboard' ? 'bg-emerald-600' : 'hover:bg-slate-800'}`}>
+                                <Icon name="pie-chart" /> Dashboard
+                            </button>
+                            <button onClick={() => setView('list')} className={`w-full flex items-center gap-3 px-4 py-3 rounded transition ${view === 'list' ? 'bg-emerald-600' : 'hover:bg-slate-800'}`}>
+                                <Icon name="folder-open" /> Demandas
+                            </button>
+                            <button onClick={() => navigateTo('form')} className={`w-full flex items-center gap-3 px-4 py-3 rounded transition ${view === 'form' ? 'bg-emerald-600' : 'hover:bg-slate-800'}`}>
+                                <Icon name="plus-square" /> Novo Registro
+                            </button>
+                        </nav>
+                        
+                        {/* Botão Logout Sidebar */}
+                        <div className="p-4">
+                             <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition">
+                                <Icon name="log-out" /> Sair
+                            </button>
+                        </div>
+
+                        <div className="p-4 border-t border-slate-800 text-xs text-slate-500 text-center">
+                            Compliance ISO 9001<br/>v1.1.1
+                        </div>
+                    </aside>
+
+                    {/* Menu Mobile Overlay (Só aparece quando aberto) */}
+                    {mobileMenuOpen && (
+                        <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col md:hidden animate-fade-in">
+                            <div className="p-4 flex justify-between items-center border-b border-slate-800">
+                                <h1 className="text-xl font-bold text-emerald-400">SIS-ESG</h1>
+                                <button onClick={() => setMobileMenuOpen(false)} className="text-white p-2">
+                                    <Icon name="x" size={28} />
+                                </button>
+                            </div>
+                            <nav className="flex-1 p-6 space-y-4">
+                                <button onClick={() => navigateTo('dashboard')} className={`w-full flex items-center gap-4 px-4 py-4 rounded text-lg ${view === 'dashboard' ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}>
+                                    <Icon name="pie-chart" size={24} /> Dashboard
+                                </button>
+                                <button onClick={() => navigateTo('list')} className={`w-full flex items-center gap-4 px-4 py-4 rounded text-lg ${view === 'list' ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}>
+                                    <Icon name="folder-open" size={24} /> Demandas
+                                </button>
+                                <button onClick={() => navigateTo('form')} className={`w-full flex items-center gap-4 px-4 py-4 rounded text-lg ${view === 'form' ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}>
+                                    <Icon name="plus-square" size={24} /> Novo Registro
+                                </button>
+                                <hr className="border-slate-700 my-4"/>
+                                <button onClick={handleLogout} className="w-full flex items-center gap-4 px-4 py-4 rounded text-lg text-slate-400 hover:text-white hover:bg-slate-800">
+                                    <Icon name="log-out" size={24} /> Sair do Sistema
+                                </button>
+                            </nav>
+                        </div>
+                    )}
+
+                    {/* Conteúdo Mobile Header */}
+                    <div className="flex-1 flex flex-col h-screen overflow-hidden">
+                        <header className="bg-white border-b shadow-sm p-4 flex justify-between items-center md:hidden shrink-0">
+                            <span className="font-bold text-slate-800 flex items-center gap-2">
+                                <Icon name="leaf" className="text-emerald-600"/> SIS-ESG
+                            </span>
+                            <button onClick={() => setMobileMenuOpen(true)} className="text-slate-600 p-2 hover:bg-slate-100 rounded">
+                                <Icon name="menu" size={24} />
+                            </button>
+                        </header>
+
+                        {/* Área Principal */}
+                        <main className="flex-1 p-4 md:p-8 overflow-y-auto bg-slate-100 pb-20 md:pb-8">
+                            {view === 'dashboard' && <Dashboard />}
+                            {view === 'list' && <DemandList />}
+                            {view === 'form' && <DemandForm />}
+                        </main>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
