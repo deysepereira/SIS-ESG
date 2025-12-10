@@ -18,6 +18,10 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
+    <!-- jsPDF & AutoTable para Exportação PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; }
         .audit-trail { font-family: 'Courier New', monospace; }
@@ -423,16 +427,48 @@
                 }
             };
 
-            const exportCSV = () => {
-                const headers = ["ID", "Ofício", "Data", "Projeto", "Status", "Valor Solicitado (R$)", "Valor Aprovado (R$)", "Link Evidência", "Cumpriu Contrapartida", "Responsável", "Departamento"];
-                const rows = demands.map(d => [d.id, d.refNumber, d.entryDate, d.project, d.status, d.value, d.approvedValue, d.evidenceLink || "", d.counterpartCompliance || "", d.assignee, d.department].join(","));
-                const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
-                const encodedUri = encodeURI(csvContent);
-                const link = document.createElement("a");
-                link.setAttribute("href", encodedUri);
-                link.setAttribute("download", "relatorio_demandas_esg.csv");
-                document.body.appendChild(link);
-                link.click();
+            // Função de Exportação PDF
+            const exportPDF = () => {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+
+                // Cabeçalho
+                doc.setFontSize(18);
+                doc.setTextColor(40, 40, 40);
+                doc.text("SIS-ESG: Relatório de Demandas", 14, 22);
+                
+                doc.setFontSize(10);
+                doc.setTextColor(100);
+                doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')} por ${user?.name || 'Sistema'}`, 14, 28);
+                doc.line(14, 32, 196, 32); // Linha horizontal
+
+                // Definição das Colunas e Dados
+                const tableColumn = ["Ofício", "Projeto", "Status", "Valor Apr.", "Compliance", "Responsável"];
+                const tableRows = [];
+
+                demands.forEach(demand => {
+                    const demandData = [
+                        demand.refNumber,
+                        demand.project || "N/A",
+                        demand.status,
+                        formatCurrency(demand.approvedValue),
+                        demand.counterpartCompliance || "-",
+                        demand.assignee || "N/A"
+                    ];
+                    tableRows.push(demandData);
+                });
+
+                // Geração da Tabela
+                doc.autoTable({
+                    head: [tableColumn],
+                    body: tableRows,
+                    startY: 35,
+                    theme: 'grid',
+                    styles: { fontSize: 8 },
+                    headStyles: { fillColor: [16, 185, 129] } // Cor Emerald (Tailwind)
+                });
+
+                doc.save(`relatorio_sis_esg_${new Date().toISOString().split('T')[0]}.pdf`);
             };
 
             // --- Telas ---
@@ -577,8 +613,8 @@
                                         <button onClick={() => setView('list')} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-3 rounded flex items-center justify-center gap-2 transition">
                                             <Icon name="list" size={18} /> Ver Lista
                                         </button>
-                                        <button onClick={exportCSV} className="flex-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 px-4 py-3 rounded flex items-center justify-center gap-2 transition">
-                                            <Icon name="file-spreadsheet" size={18} /> Relatório CSV
+                                        <button onClick={exportPDF} className="flex-1 bg-red-100 hover:bg-red-200 text-red-800 px-4 py-3 rounded flex items-center justify-center gap-2 transition">
+                                            <Icon name="file-text" size={18} /> Relatório PDF
                                         </button>
                                     </div>
                                 </div>
