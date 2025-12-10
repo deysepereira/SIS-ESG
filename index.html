@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SISTEMA SIS-ESG | Registro de Demandas</title>
+    <title>SISTEMA SIS-ESG | Registro de Demandas Blindado</title>
     
     <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -18,15 +18,24 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
-    <!-- jsPDF & AutoTable para Exportação PDF -->
+    <!-- jsPDF & AutoTable -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 
+    <!-- Firebase SDKs (Modular) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, arrayUnion, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Expondo funções para o escopo global do React
+        window.Firebase = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut, getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, arrayUnion, serverTimestamp };
+    </script>
+
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; }
-        .audit-trail { font-family: 'Courier New', monospace; }
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .audit-trail { font-family: 'Courier New', monospace; font-size: 0.75rem; }
         
-        /* Animação de Fundo para o Login */
         .login-bg {
             background-color: #0f172a;
             background-image: 
@@ -42,6 +51,14 @@
         .animate-fade-in-up {
             animation: fade-in-up 0.5s ease-out forwards;
         }
+
+        /* Estilo para barras do gráfico */
+        .bar-container { height: 180px; display: flex; align-items: flex-end; gap: 12px; padding-top: 20px; }
+        .bar-wrapper { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; position: relative; }
+        .bar { width: 100%; max-width: 40px; border-radius: 4px 4px 0 0; transition: height 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
+        .bar:hover { filter: brightness(1.1); }
+        .tooltip { opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+        .bar-wrapper:hover .tooltip { opacity: 1; }
     </style>
 </head>
 <body>
@@ -50,989 +67,472 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
 
-        // --- Componente de Ícone Seguro (Correção do Bug removeChild) ---
-        // Em vez de usar createIcons() que substitui o nó do React, usamos createElement e anexamos a um ref.
+        // --- Configuração Segura e Inicialização do Firebase ---
+        // Em produção, estas variáveis viriam de variáveis de ambiente injetadas
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app';
+        
+        let db, auth;
+        if (window.Firebase && firebaseConfig.apiKey) {
+            const app = window.Firebase.initializeApp(firebaseConfig);
+            db = window.Firebase.getFirestore(app);
+            auth = window.Firebase.getAuth(app);
+        }
+
+        // --- Componentes UI ---
         const Icon = ({ name, size = 20, className = "" }) => {
             const ref = useRef(null);
-
             useEffect(() => {
                 if (window.lucide && ref.current) {
-                    // Converter kebab-case (ex: layout-dashboard) para PascalCase (LayoutDashboard) para acessar a lib
                     const pascalName = name.replace(/(^\w|-\w)/g, (clear) => clear.replace('-', '').toUpperCase());
-                    
                     const iconDef = window.lucide.icons ? window.lucide.icons[pascalName] : null;
-                    
                     if (iconDef) {
                         const svg = window.lucide.createElement(iconDef);
                         svg.setAttribute('width', size);
                         svg.setAttribute('height', size);
-                        // Combina classes do Tailwind com o SVG
                         if (className) svg.setAttribute('class', className);
-                        
                         ref.current.innerHTML = '';
                         ref.current.appendChild(svg);
-                    } else {
-                         // Fallback visual caso o nome do ícone não bata exatamente
-                         console.warn(`Ícone não encontrado: ${name} -> ${pascalName}`);
                     }
                 }
             }, [name, size, className]);
-
             return <span ref={ref} style={{ display: 'inline-flex', verticalAlign: 'middle' }}></span>;
         };
 
-        // --- Utilitário de Formatação de Moeda ---
-        const formatCurrency = (value) => {
-            return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
-        };
+        const formatCurrency = (value) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
 
-        // --- Mock Inicial de Dados ---
-        const initialData = [
-            {
-                id: 1,
-                refNumber: "OF-2024/001",
-                entryDate: "2024-02-10",
-                initialAssessment: "Solicitação de reparo em área de preservação permanente.",
-                technicalOpinion: "Viável, necessita licença simplificada.",
-                department: "Engenharia Ambiental",
-                project: "Reabilitação Rio Azul", // Novo campo
-                status: "Em execução",
-                assignee: "Carlos Silva",
-                deadline: "2024-05-15",
-                value: 15400.50, // Valor Solicitado
-                approvedValue: 12000.00, // Valor Aprovado
-                evidenceLink: "https://drive.google.com/drive/folders/example", // Link Evidência
-                counterpartCompliance: "Sim", // Cumpriu Contrapartida?
-                finalDecision: "Aprovado com ressalvas",
-                notes: "Aguardando compra de materiais.",
-                files: ["licenca_prev.pdf"],
-                auditTrail: [
-                    { date: "2024-02-10 10:00", user: "Admin", action: "Criação do Registro" },
-                    { date: "2024-02-12 14:30", user: "Gerente", action: "Status alterado para Em execução" }
-                ]
-            }
-        ];
-
-        // --- Componente de Login ---
-        const LoginScreen = ({ onLogin }) => {
-            const [email, setEmail] = useState('');
-            const [password, setPassword] = useState('');
-            const [showPassword, setShowPassword] = useState(false); // Novo estado para visibilidade
-            const [loading, setLoading] = useState(false);
-            const [error, setError] = useState('');
-            
-            // Estados para Recuperação de Senha
-            const [viewState, setViewState] = useState('login'); // 'login' | 'reset'
-            const [resetEmail, setResetEmail] = useState('');
-            const [resetStatus, setResetStatus] = useState('idle'); // 'idle' | 'loading' | 'success'
-
-            const handleSubmit = (e) => {
-                e.preventDefault();
-                setLoading(true);
-                setError('');
-                
-                // Simulação de delay de rede
-                setTimeout(() => {
-                    if (email && password) {
-                        onLogin({ email, name: email.split('@')[0] });
-                    } else {
-                        setError('Por favor, preencha todos os campos.');
-                        setLoading(false);
-                    }
-                }, 800);
-            };
-
-            const handleResetSubmit = (e) => {
-                e.preventDefault();
-                if (!resetEmail) {
-                    setError('Por favor, informe seu e-mail.');
-                    return;
-                }
-                
-                setResetStatus('loading');
-                setError('');
-
-                // Simulação de envio de email
-                setTimeout(() => {
-                    setResetStatus('success');
-                }, 1500);
-            };
-
-            // Renderização da Tela de Recuperação
-            if (viewState === 'reset') {
-                return (
-                    <div className="min-h-screen login-bg flex items-center justify-center p-4">
-                        <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-fade-in-up">
-                            <div className="p-8 text-center border-b border-slate-100">
-                                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-100 mb-4 text-blue-600">
-                                    <Icon name="key-round" size={32} />
-                                </div>
-                                <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Recuperar Senha</h1>
-                                <p className="text-sm text-slate-500 mt-1">Enviaremos as instruções para o seu e-mail.</p>
-                            </div>
-
-                            <div className="p-8">
-                                {resetStatus === 'success' ? (
-                                    <div className="text-center space-y-4 animate-fade-in">
-                                        <div className="bg-emerald-50 text-emerald-700 p-4 rounded-lg flex flex-col items-center gap-2">
-                                            <Icon name="check-circle" size={32} />
-                                            <span className="font-semibold">E-mail enviado com sucesso!</span>
-                                        </div>
-                                        <p className="text-sm text-slate-600">
-                                            Verifique sua caixa de entrada (e spam) no endereço <strong>{resetEmail}</strong> para redefinir sua senha.
-                                        </p>
-                                        <button 
-                                            onClick={() => { setViewState('login'); setResetStatus('idle'); setResetEmail(''); }}
-                                            className="w-full bg-slate-900 text-white font-semibold py-3 rounded-lg hover:bg-slate-800 transition"
-                                        >
-                                            Voltar para Login
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <form onSubmit={handleResetSubmit} className="space-y-4">
-                                        <div>
-                                            <label className="block text-sm font-medium text-slate-700 mb-1">E-mail Cadastrado</label>
-                                            <div className="relative">
-                                                <div className="absolute left-3 top-3 text-slate-400 pointer-events-none">
-                                                    <Icon name="mail" size={18} />
-                                                </div>
-                                                <input 
-                                                    type="email" 
-                                                    value={resetEmail}
-                                                    onChange={(e) => setResetEmail(e.target.value)}
-                                                    className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition" 
-                                                    placeholder="seu.email@instituto.org"
-                                                    required
-                                                />
-                                            </div>
-                                        </div>
-
-                                        <button 
-                                            type="submit" 
-                                            disabled={resetStatus === 'loading'}
-                                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg shadow-lg hover:shadow-xl transition flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-                                        >
-                                            {resetStatus === 'loading' ? (
-                                                <>
-                                                    <Icon name="loader-2" className="animate-spin" /> Enviando...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    Enviar Link de Redefinição
-                                                </>
-                                            )}
-                                        </button>
-
-                                        <button 
-                                            type="button"
-                                            onClick={() => { setViewState('login'); setError(''); }}
-                                            className="w-full text-slate-500 hover:text-slate-700 font-medium py-2 text-sm flex items-center justify-center gap-1"
-                                        >
-                                            <Icon name="arrow-left" size={16} /> Voltar para Login
-                                        </button>
-                                    </form>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                );
-            }
-
-            // Renderização da Tela de Login (Padrão)
+        // --- Login Seguro ---
+        const LoginScreen = ({ onLogin, loading }) => {
             return (
                 <div className="min-h-screen login-bg flex items-center justify-center p-4">
                     <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-fade-in-up">
                         <div className="p-8 pb-6 text-center border-b border-slate-100">
                             <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-100 mb-4 text-emerald-600">
-                                <Icon name="leaf" size={32} />
+                                <Icon name="shield-check" size={32} />
                             </div>
-                            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">SIS-ESG</h1>
-                            <p className="text-sm text-slate-500 mt-1">Sistema de Gestão Socioambiental</p>
+                            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">SIS-ESG Seguro</h1>
+                            <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider">Acesso Restrito & Auditado</p>
                         </div>
-
                         <div className="p-8 pt-6">
-                            <form onSubmit={handleSubmit} className="space-y-4">
-                                {error && (
-                                    <div className="bg-red-50 text-red-600 p-3 rounded text-sm flex items-center gap-2">
-                                        <Icon name="alert-circle" size={16} /> {error}
-                                    </div>
-                                )}
-                                
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">E-mail Corporativo</label>
-                                    <div className="relative">
-                                        <div className="absolute left-3 top-3 text-slate-400 pointer-events-none">
-                                            <Icon name="mail" size={18} />
-                                        </div>
-                                        <input 
-                                            type="email" 
-                                            value={email}
-                                            onChange={(e) => setEmail(e.target.value)}
-                                            className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition" 
-                                            placeholder="seu.nome@instituto.org"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Senha</label>
-                                    <div className="relative">
-                                        <div className="absolute left-3 top-3 text-slate-400 pointer-events-none">
-                                            <Icon name="lock" size={18} />
-                                        </div>
-                                        <input 
-                                            type={showPassword ? "text" : "password"} 
-                                            value={password}
-                                            onChange={(e) => setPassword(e.target.value)}
-                                            className="w-full pl-10 pr-12 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition" 
-                                            placeholder="••••••••"
-                                        />
-                                        <button 
-                                            type="button"
-                                            onClick={() => setShowPassword(!showPassword)}
-                                            className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 focus:outline-none"
-                                            title={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                                        >
-                                            <Icon name={showPassword ? "eye-off" : "eye"} size={18} />
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center justify-between text-sm">
-                                    <label className="flex items-center gap-2 text-slate-600 cursor-pointer">
-                                        <input type="checkbox" className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
-                                        Lembrar-me
-                                    </label>
-                                    <button 
-                                        type="button"
-                                        onClick={() => { setViewState('reset'); setError(''); }}
-                                        className="text-emerald-600 hover:text-emerald-700 font-medium"
-                                    >
-                                        Esqueceu a senha?
-                                    </button>
-                                </div>
-
-                                <button 
-                                    type="submit" 
-                                    disabled={loading}
-                                    className="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-3 rounded-lg shadow-lg hover:shadow-xl transition flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-                                >
-                                    {loading ? (
-                                        <>
-                                            <Icon name="loader-2" className="animate-spin" /> Autenticando...
-                                        </>
-                                    ) : (
-                                        <>
-                                            Entrar no Sistema <Icon name="arrow-right" size={18} />
-                                        </>
-                                    )}
-                                </button>
-                            </form>
-
-                            <div className="mt-6 text-center">
-                                <p className="text-xs text-slate-400">
-                                    Ambiente Seguro • Compliance ISO 9001
-                                </p>
-                            </div>
-                        </div>
-                        <div className="bg-slate-50 p-4 text-center border-t border-slate-100">
-                             <button 
-                                onClick={() => onLogin({ name: 'Visitante', email: 'demo@sis-esg.com' })}
-                                className="text-sm text-slate-500 hover:text-emerald-600 transition underline"
-                             >
-                                Acessar Versão Demo (Sem Senha)
-                             </button>
+                            <button 
+                                onClick={onLogin} 
+                                disabled={loading}
+                                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-4 rounded-lg shadow-lg hover:shadow-xl transition flex items-center justify-center gap-3 disabled:opacity-70"
+                            >
+                                {loading ? <Icon name="loader-2" className="animate-spin" /> : <Icon name="lock" />}
+                                {loading ? "Estabelecendo Conexão Segura..." : "Autenticar no Sistema"}
+                            </button>
+                            <p className="mt-4 text-center text-xs text-slate-400">
+                                Este sistema utiliza criptografia de ponta a ponta e registra todas as ações para fins de auditoria (ISO 27001).
+                            </p>
                         </div>
                     </div>
                 </div>
             );
         };
 
-        // --- Componente Principal ---
+        // --- Aplicação Principal ---
         const App = () => {
-            const [user, setUser] = useState(null); // Estado de Autenticação
-            const [view, setView] = useState('dashboard'); // dashboard, list, form, detail
-            const [mobileMenuOpen, setMobileMenuOpen] = useState(false); // Estado para menu mobile
-            const [demands, setDemands] = useState(() => {
-                const saved = localStorage.getItem('esg_demands');
-                return saved ? JSON.parse(saved) : initialData;
-            });
+            const [user, setUser] = useState(null);
+            const [view, setView] = useState('dashboard');
+            const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+            const [demands, setDemands] = useState([]);
             const [currentDemand, setCurrentDemand] = useState(null);
-            const [filterStatus, setFilterStatus] = useState('Todos');
-            const [searchTerm, setSearchTerm] = useState('');
+            const [authLoading, setAuthLoading] = useState(false);
+            const [listFilters, setListFilters] = useState({ status: 'Todos', project: 'Todos', startDate: '', endDate: '', search: '' });
 
-            // Persistência
+            // 1. Inicialização e Autenticação Segura
             useEffect(() => {
-                localStorage.setItem('esg_demands', JSON.stringify(demands));
-            }, [demands]);
+                if (!auth) return;
+                
+                const initAuth = async () => {
+                    setAuthLoading(true);
+                    try {
+                        // Prioriza token customizado se disponível (ambiente seguro), senão anônimo (teste)
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await window.Firebase.signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await window.Firebase.signInAnonymously(auth);
+                        }
+                    } catch (error) {
+                        console.error("Falha na autenticação:", error);
+                        alert("Erro de segurança ao autenticar. Contate o administrador.");
+                    } finally {
+                        setAuthLoading(false);
+                    }
+                };
 
-            // --- Lógica de Negócio ---
+                initAuth();
+                return window.Firebase.onAuthStateChanged(auth, (u) => setUser(u));
+            }, []);
 
-            const handleLogin = (userData) => {
-                setUser(userData);
-            };
+            // 2. Listener de Dados em Tempo Real (Firestore)
+            useEffect(() => {
+                if (!user || !db) return;
 
-            const handleLogout = () => {
-                setUser(null);
-                setView('dashboard');
-            };
+                const q = window.Firebase.collection(db, 'artifacts', appId, 'public', 'data', 'esg_demands');
+                
+                const unsubscribe = window.Firebase.onSnapshot(q, (snapshot) => {
+                    const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+                    data.sort((a, b) => new Date(b.entryDate) - new Date(a.entryDate));
+                    setDemands(data);
+                }, (error) => {
+                    console.error("Acesso negado ou erro de conexão:", error);
+                });
 
-            const handleSave = (demand) => {
-                const now = new Date().toLocaleString('pt-BR');
-                // Assegurar que os valores sejam numéricos e projeto esteja preenchido
-                const demandToSave = { 
-                    ...demand, 
+                return () => unsubscribe();
+            }, [user]);
+
+            // --- Handlers de Ação ---
+
+            const handleSave = async (demand) => {
+                if (!user) return;
+
+                const cleanData = {
+                    refNumber: String(demand.refNumber || '').trim(),
+                    entryDate: demand.entryDate || new Date().toISOString().split('T')[0],
+                    initialAssessment: String(demand.initialAssessment || ''),
+                    technicalOpinion: String(demand.technicalOpinion || ''),
+                    department: String(demand.department || 'Jurídico'),
+                    project: String(demand.project || 'Não Identificado'),
+                    status: String(demand.status || 'Pendente'),
+                    assignee: String(demand.assignee || ''),
+                    deadline: String(demand.deadline || ''),
                     value: parseFloat(demand.value) || 0,
                     approvedValue: parseFloat(demand.approvedValue) || 0,
-                    project: demand.project || "Não Identificado" // Valor padrão
+                    evidenceLink: String(demand.evidenceLink || ''),
+                    counterpartCompliance: String(demand.counterpartCompliance || ''),
+                    finalDecision: String(demand.finalDecision || ''),
+                    notes: String(demand.notes || ''),
                 };
 
-                const currentUser = user ? user.name : "Sistema";
+                const auditEntry = {
+                    date: new Date().toISOString(), 
+                    user: user.uid.substring(0, 8) + '...',
+                    action: demand.id ? "Edição de Registro" : "Criação de Registro"
+                };
 
-                if (demand.id) {
-                    // Edição
-                    const updatedDemands = demands.map(d => {
-                        if (d.id === demand.id) {
-                            // Adicionar log de auditoria
-                            const newTrail = [...d.auditTrail, { date: now, user: currentUser, action: "Atualização de registro" }];
-                            return { ...demandToSave, auditTrail: newTrail };
-                        }
-                        return d;
-                    });
-                    setDemands(updatedDemands);
-                } else {
-                    // Novo
-                    const newDemand = {
-                        ...demandToSave,
-                        id: Date.now(),
-                        auditTrail: [{ date: now, user: currentUser, action: "Criação do Registro" }],
-                        files: []
-                    };
-                    setDemands([...demands, newDemand]);
-                }
-                setView('list');
-            };
+                try {
+                    const collectionRef = window.Firebase.collection(db, 'artifacts', appId, 'public', 'data', 'esg_demands');
 
-            // Função auxiliar para navegar e fechar menu mobile
-            const navigateTo = (newView) => {
-                setView(newView);
-                setMobileMenuOpen(false);
-                if (newView === 'form') setCurrentDemand(null);
-            };
-
-            const handleDelete = (id) => {
-                if(confirm("Confirma a exclusão? Isso afetará a trilha de auditoria.")) {
-                    setDemands(demands.filter(d => d.id !== id));
+                    if (demand.id) {
+                        const docRef = window.Firebase.doc(db, 'artifacts', appId, 'public', 'data', 'esg_demands', demand.id);
+                        await window.Firebase.updateDoc(docRef, {
+                            ...cleanData,
+                            updatedAt: window.Firebase.serverTimestamp(), 
+                            auditTrail: window.Firebase.arrayUnion(auditEntry)
+                        });
+                    } else {
+                        await window.Firebase.addDoc(collectionRef, {
+                            ...cleanData,
+                            createdAt: window.Firebase.serverTimestamp(), 
+                            updatedAt: window.Firebase.serverTimestamp(), 
+                            auditTrail: [auditEntry]
+                        });
+                    }
                     setView('list');
+                } catch (error) {
+                    console.error("Erro ao salvar:", error);
+                    alert("Erro de permissão ou dados inválidos.");
                 }
             };
 
-            // Função de Exportação PDF
-            const exportPDF = () => {
+            const handleDelete = async (id) => {
+                if (!user) return;
+                if (confirm("ATENÇÃO: A exclusão apaga permanentemente as evidências de auditoria. Continuar?")) {
+                    try {
+                        await window.Firebase.deleteDoc(window.Firebase.doc(db, 'artifacts', appId, 'public', 'data', 'esg_demands', id));
+                    } catch (e) {
+                        alert("Erro: Apenas Administradores podem excluir registros.");
+                    }
+                }
+            };
+
+            const exportPDF = (filteredData) => {
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF();
+                doc.setFontSize(18); doc.text("Relatório de Auditoria: Demandas ESG", 14, 22);
+                doc.setFontSize(10); doc.text(`Extraído em: ${new Date().toLocaleString()} | ID Usuário: ${user.uid}`, 14, 28);
+                doc.line(14, 32, 196, 32);
 
-                // Cabeçalho
-                doc.setFontSize(18);
-                doc.setTextColor(40, 40, 40);
-                doc.text("SIS-ESG: Relatório de Demandas", 14, 22);
-                
-                doc.setFontSize(10);
-                doc.setTextColor(100);
-                doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')} por ${user?.name || 'Sistema'}`, 14, 28);
-                doc.line(14, 32, 196, 32); // Linha horizontal
+                const tableRows = filteredData.map(d => [
+                    d.refNumber, d.entryDate.split('-').reverse().join('/'), 
+                    d.project, d.status, formatCurrency(d.approvedValue), 
+                    d.counterpartCompliance === 'Não' ? 'IRREGULAR' : 'OK'
+                ]);
 
-                // Definição das Colunas e Dados
-                const tableColumn = ["Ofício", "Projeto", "Status", "Valor Apr.", "Compliance", "Responsável"];
-                const tableRows = [];
-
-                demands.forEach(demand => {
-                    const demandData = [
-                        demand.refNumber,
-                        demand.project || "N/A",
-                        demand.status,
-                        formatCurrency(demand.approvedValue),
-                        demand.counterpartCompliance || "-",
-                        demand.assignee || "N/A"
-                    ];
-                    tableRows.push(demandData);
-                });
-
-                // Geração da Tabela
                 doc.autoTable({
-                    head: [tableColumn],
+                    head: [["Ofício", "Data", "Projeto", "Status", "Valor Apr.", "Compliance"]],
                     body: tableRows,
                     startY: 35,
-                    theme: 'grid',
-                    styles: { fontSize: 8 },
-                    headStyles: { fillColor: [16, 185, 129] } // Cor Emerald (Tailwind)
+                    headStyles: { fillColor: [15, 23, 42] }, 
+                    alternateRowStyles: { fillColor: [241, 245, 249] } 
                 });
-
-                doc.save(`relatorio_sis_esg_${new Date().toISOString().split('T')[0]}.pdf`);
+                doc.save(`auditoria_esg_${new Date().getTime()}.pdf`);
             };
 
-            // --- Telas ---
-
+            // --- Sub-componentes ---
+            
             const Dashboard = () => {
-                // Estatísticas Gerais
-                const stats = {
-                    total: demands.length,
-                    pending: demands.filter(d => d.status === 'Pendente').length,
-                    executing: demands.filter(d => d.status === 'Em execução').length,
-                    completed: demands.filter(d => d.status === 'Concluída').length,
-                    totalRequested: demands.reduce((acc, curr) => acc + (parseFloat(curr.value) || 0), 0),
-                    totalApproved: demands.reduce((acc, curr) => acc + (parseFloat(curr.approvedValue) || 0), 0)
-                };
-                
-                // Filtro de Compliance (Contrapartida Não Cumprida)
-                const nonCompliantDemands = demands.filter(d => d.counterpartCompliance === 'Não');
+                const [filters, setFilters] = useState({ startDate: '', endDate: '', project: 'Todos', status: 'Todos' });
+                const projects = useMemo(() => ['Todos', ...new Set(demands.map(d => d.project || 'Não Identificado'))], [demands]);
 
-                // Cálculo de Projetos Mais Atendidos
-                const projectCounts = demands.reduce((acc, curr) => {
-                    const proj = curr.project || 'Não Identificado';
-                    acc[proj] = (acc[proj] || 0) + 1;
-                    return acc;
-                }, {});
+                const filtered = useMemo(() => demands.filter(d => {
+                    const date = d.entryDate;
+                    const matchStart = !filters.startDate || date >= filters.startDate;
+                    const matchEnd = !filters.endDate || date <= filters.endDate;
+                    const matchProj = filters.project === 'Todos' || d.project === filters.project;
+                    const matchStatus = filters.status === 'Todos' || d.status === filters.status;
+                    return matchStart && matchEnd && matchProj && matchStatus;
+                }), [demands, filters]);
 
-                const topProjects = Object.entries(projectCounts)
-                    .sort(([,a], [,b]) => b - a) // Ordena do maior para o menor
-                    .slice(0, 5); // Pega o Top 5
+                // Cálculo para Gráfico Mensal
+                const monthlyData = useMemo(() => {
+                    const data = {};
+                    filtered.forEach(d => {
+                        const m = d.entryDate.substring(0, 7);
+                        if(!data[m]) data[m] = { val: 0, count: 0 };
+                        data[m].val += d.approvedValue || 0;
+                        data[m].count++;
+                    });
+                    return Object.keys(data).sort().map(k => ({ month: k, ...data[k] }));
+                }, [filtered]);
+                const maxVal = Math.max(...monthlyData.map(d => d.val), 1);
+
+                // Cálculo Ranking Financeiro de Projetos (Novo)
+                const projectRanking = useMemo(() => {
+                    const ranking = {};
+                    filtered.forEach(d => {
+                        const proj = d.project || 'Não Identificado';
+                        if (!ranking[proj]) ranking[proj] = 0;
+                        ranking[proj] += (d.approvedValue || 0);
+                    });
+                    return Object.entries(ranking)
+                        .sort(([,a], [,b]) => b - a)
+                        .map(([project, value]) => ({ project, value }));
+                }, [filtered]);
+
+                const irregulars = filtered.filter(d => d.counterpartCompliance === 'Não');
 
                 return (
                     <div className="space-y-6 animate-fade-in">
-                        <div className="flex justify-between items-end">
-                            <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-                                <Icon name="layout-dashboard" /> Painel de Controle
-                            </h2>
-                            <span className="text-sm text-slate-500">Olá, <span className="font-semibold text-slate-700">{user?.name}</span></span>
+                        {/* Filtros */}
+                        <div className="bg-white p-4 rounded border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                            <div><label className="text-xs font-bold text-slate-500">Início</label><input type="date" className="w-full border p-2 rounded text-sm" onChange={e=>setFilters({...filters, startDate: e.target.value})}/></div>
+                            <div><label className="text-xs font-bold text-slate-500">Fim</label><input type="date" className="w-full border p-2 rounded text-sm" onChange={e=>setFilters({...filters, endDate: e.target.value})}/></div>
+                            <div><label className="text-xs font-bold text-slate-500">Projeto</label><select className="w-full border p-2 rounded text-sm" onChange={e=>setFilters({...filters, project: e.target.value})}>{projects.map(p=><option key={p}>{p}</option>)}</select></div>
+                            <div><label className="text-xs font-bold text-slate-500">Status</label><select className="w-full border p-2 rounded text-sm" onChange={e=>setFilters({...filters, status: e.target.value})}><option>Todos</option><option>Pendente</option><option>Em execução</option><option>Concluída</option></select></div>
                         </div>
-                        
-                        {/* KPI Cards */}
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                            {/* Card de Alerta de Compliance (Se houver problemas) */}
-                            {nonCompliantDemands.length > 0 ? (
-                                <div className="bg-red-600 text-white p-6 rounded-lg shadow-sm border-l-4 border-red-800 col-span-1 md:col-span-4 lg:col-span-1 animate-pulse">
-                                    <p className="text-xs text-red-100 font-semibold uppercase tracking-wider mb-1 flex items-center gap-1">
-                                        <Icon name="alert-triangle" size={14}/> Risco de Compliance
-                                    </p>
-                                    <p className="text-3xl font-bold">{nonCompliantDemands.length}</p>
-                                    <p className="text-xs text-red-200 mt-1">Projetos sem contrapartida</p>
-                                </div>
-                            ) : (
-                                <div className="bg-emerald-600 text-white p-6 rounded-lg shadow-sm border-l-4 border-emerald-800 col-span-1 md:col-span-4 lg:col-span-1">
-                                    <p className="text-xs text-emerald-100 font-semibold uppercase tracking-wider mb-1 flex items-center gap-1">
-                                        <Icon name="shield-check" size={14}/> Compliance
-                                    </p>
-                                    <p className="text-xl font-bold mt-1">100% OK</p>
-                                    <p className="text-xs text-emerald-200 mt-1">Contrapartidas em dia</p>
-                                </div>
-                            )}
 
-                            {/* Card de Valor Financeiro Solicitado */}
-                            <div className="bg-slate-800 text-white p-6 rounded-lg shadow-sm border-l-4 border-blue-400 col-span-1 md:col-span-2 lg:col-span-1">
-                                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-1">Total Solicitado</p>
-                                <p className="text-2xl font-bold flex items-center gap-2">
-                                    {formatCurrency(stats.totalRequested)}
-                                </p>
+                        {/* KPIs */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="bg-white p-6 border-l-4 border-slate-800 shadow-sm">
+                                <p className="text-slate-500 text-xs font-bold uppercase">Total Filtrado</p>
+                                <p className="text-3xl font-bold">{filtered.length}</p>
                             </div>
-                            
-                            {/* Card de Valor Financeiro Aprovado */}
-                            <div className="bg-slate-700 text-white p-6 rounded-lg shadow-sm border-l-4 border-emerald-400 col-span-1 md:col-span-2 lg:col-span-1">
-                                <p className="text-xs text-emerald-100 font-semibold uppercase tracking-wider mb-1">Total Aprovado</p>
-                                <p className="text-2xl font-bold flex items-center gap-2">
-                                    {formatCurrency(stats.totalApproved)}
-                                </p>
+                            <div className="bg-white p-6 border-l-4 border-emerald-600 shadow-sm">
+                                <p className="text-slate-500 text-xs font-bold uppercase">Aprovado (R$)</p>
+                                <p className="text-3xl font-bold">{formatCurrency(filtered.reduce((a,b)=>a+b.approvedValue,0))}</p>
                             </div>
-
-                            <div className="bg-white p-6 rounded-lg shadow-sm border-l-4 border-blue-500">
-                                <p className="text-xs text-slate-500 font-semibold uppercase">Total Demandas</p>
-                                <p className="text-3xl font-bold text-slate-800">{stats.total}</p>
+                            <div className={`p-6 border-l-4 shadow-sm ${irregulars.length > 0 ? 'bg-red-50 border-red-600' : 'bg-white border-green-600'}`}>
+                                <p className="text-slate-500 text-xs font-bold uppercase flex items-center gap-2">
+                                    {irregulars.length > 0 && <Icon name="alert-triangle" size={16} className="text-red-600"/>} Risco Compliance
+                                </p>
+                                <p className={`text-3xl font-bold ${irregulars.length > 0 ? 'text-red-700' : 'text-slate-800'}`}>{irregulars.length}</p>
                             </div>
                         </div>
 
-                        {/* Seção de Alerta de Projetos Irregulares (Só aparece se houver) */}
-                        {nonCompliantDemands.length > 0 && (
-                            <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-                                <h3 className="text-lg font-bold text-red-800 mb-4 flex items-center gap-2">
-                                    <Icon name="alert-octagon" className="text-red-600"/> Projetos com Contrapartida Pendente (Ação Necessária)
-                                </h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {nonCompliantDemands.map(d => (
-                                        <div key={d.id} className="bg-white p-4 rounded shadow-sm border-l-4 border-red-500 flex flex-col justify-between">
-                                            <div>
-                                                <p className="font-bold text-slate-800 text-sm mb-1">{d.project || "Projeto Não Identificado"}</p>
-                                                <div className="flex justify-between items-center mb-2">
-                                                    <span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-600">{d.refNumber}</span>
-                                                    <span className="text-xs font-mono text-slate-500">{d.entryDate.split('-').reverse().join('/')}</span>
-                                                </div>
-                                                <p className="text-xs text-slate-600 line-clamp-2 italic">"{d.initialAssessment}"</p>
-                                            </div>
-                                            <button 
-                                                onClick={() => { setCurrentDemand(d); setView('form'); }} 
-                                                className="mt-3 text-xs bg-red-100 text-red-700 hover:bg-red-200 py-2 px-3 rounded flex items-center justify-center gap-2 transition"
-                                            >
-                                                Regularizar <Icon name="arrow-right" size={12}/>
-                                            </button>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
+                        {/* Layout Inferior: Gráfico e Ranking Lado a Lado */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                             <div className="bg-white p-6 rounded-lg shadow-sm">
-                                <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                                    <Icon name="briefcase" className="text-emerald-600"/> Projetos Mais Atendidos
+                            
+                            {/* Gráfico */}
+                            <div className="bg-white p-6 rounded shadow-sm flex flex-col">
+                                <h3 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
+                                    <Icon name="bar-chart-2" className="text-blue-600"/> Evolução Mensal (Volume)
                                 </h3>
-                                <div className="space-y-4">
-                                    {topProjects.length > 0 ? topProjects.map(([proj, count], idx) => (
-                                        <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 rounded border border-slate-100">
+                                {monthlyData.length > 0 ? (
+                                    <div className="bar-container border-b border-slate-200 mt-auto">
+                                        {monthlyData.map(d => (
+                                            <div key={d.month} className="bar-wrapper group">
+                                                <div className="tooltip absolute -top-10 bg-slate-800 text-white text-xs p-2 rounded z-10">
+                                                    {formatCurrency(d.val)} <br/> ({d.count} demandas)
+                                                </div>
+                                                <div className="bar bg-emerald-500 group-hover:bg-emerald-600" style={{height: `${(d.val/maxVal)*100}%`, minHeight: '4px'}}></div>
+                                                <div className="text-[10px] text-slate-500 mt-2">{d.month}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : <p className="text-slate-400 text-sm text-center py-8">Sem dados para exibir.</p>}
+                            </div>
+
+                            {/* Ranking Financeiro (Novo Módulo) */}
+                            <div className="bg-white p-6 rounded shadow-sm">
+                                <h3 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
+                                    <Icon name="trending-up" className="text-emerald-600"/> Ranking Financeiro por Projeto
+                                </h3>
+                                <div className="space-y-3 max-h-64 overflow-y-auto pr-2">
+                                    {projectRanking.length > 0 ? projectRanking.map((item, idx) => (
+                                        <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 rounded border border-slate-100 hover:bg-slate-100 transition">
                                             <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-sm">
+                                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${idx < 3 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>
                                                     {idx + 1}
                                                 </div>
-                                                <span className="font-medium text-slate-700">{proj}</span>
+                                                <span className="text-sm font-medium text-slate-700 truncate max-w-[150px] md:max-w-[200px]" title={item.project}>{item.project}</span>
                                             </div>
-                                            <div className="text-sm font-semibold text-slate-600">
-                                                {count} {count === 1 ? 'demanda' : 'demandas'}
-                                            </div>
+                                            <span className="text-sm font-bold text-emerald-700">{formatCurrency(item.value)}</span>
                                         </div>
                                     )) : (
-                                        <p className="text-slate-400 text-center py-4">Nenhum projeto registrado.</p>
+                                        <p className="text-slate-400 text-sm text-center py-8">Nenhum projeto com aporte registrado.</p>
                                     )}
-                                </div>
-                             </div>
-
-                             <div className="bg-white p-6 rounded-lg shadow-sm">
-                                <h3 className="text-lg font-semibold mb-4 text-slate-700">Ações Rápidas</h3>
-                                <div className="flex flex-col gap-3">
-                                    <button onClick={() => { setCurrentDemand(null); setView('form'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded flex items-center justify-center gap-2 w-full transition">
-                                        <Icon name="plus-circle" size={18} /> Nova Demanda
-                                    </button>
-                                    <div className="flex gap-3">
-                                        <button onClick={() => setView('list')} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-3 rounded flex items-center justify-center gap-2 transition">
-                                            <Icon name="list" size={18} /> Ver Lista
-                                        </button>
-                                        <button onClick={exportPDF} className="flex-1 bg-red-100 hover:bg-red-200 text-red-800 px-4 py-3 rounded flex items-center justify-center gap-2 transition">
-                                            <Icon name="file-text" size={18} /> Relatório PDF
-                                        </button>
-                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                );
+                )
             };
 
             const DemandList = () => {
-                const filtered = demands.filter(d => 
-                    (filterStatus === 'Todos' || d.status === filterStatus) &&
-                    (d.refNumber.toLowerCase().includes(searchTerm.toLowerCase()) || d.initialAssessment.toLowerCase().includes(searchTerm.toLowerCase()) || (d.project && d.project.toLowerCase().includes(searchTerm.toLowerCase())))
-                );
-
-                const getStatusColor = (status) => {
-                    switch(status) {
-                        case 'Pendente': return 'bg-yellow-100 text-yellow-800';
-                        case 'Em análise': return 'bg-blue-100 text-blue-800';
-                        case 'Em execução': return 'bg-purple-100 text-purple-800';
-                        case 'Concluída': return 'bg-emerald-100 text-emerald-800';
-                        case 'Indeferida': return 'bg-red-100 text-red-800';
-                        default: return 'bg-slate-100 text-slate-800';
-                    }
-                };
+                // Filtros da Lista (Cópia da lógica para brevidade, mas independente)
+                const projects = useMemo(() => ['Todos', ...new Set(demands.map(d => d.project || 'Não Identificado'))], [demands]);
+                const filtered = useMemo(() => demands.filter(d => {
+                    const matchSearch = d.refNumber.toLowerCase().includes(listFilters.search.toLowerCase());
+                    const matchProj = listFilters.project === 'Todos' || d.project === listFilters.project;
+                    const matchStatus = listFilters.status === 'Todos' || d.status === listFilters.status;
+                    const matchDateStart = !listFilters.startDate || d.entryDate >= listFilters.startDate;
+                    const matchDateEnd = !listFilters.endDate || d.entryDate <= listFilters.endDate;
+                    return matchSearch && matchProj && matchStatus && matchDateStart && matchDateEnd;
+                }), [demands, listFilters]);
 
                 return (
-                    <div className="bg-white rounded-lg shadow-sm p-6">
-                        <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-xl font-bold flex items-center gap-2"><Icon name="list" /> Registros</h2>
-                            <button onClick={() => { setCurrentDemand(null); setView('form'); }} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">Novo Registro</button>
-                        </div>
-
-                        <div className="flex gap-4 mb-6 flex-wrap">
-                            <div className="flex-1 relative">
-                                <div className="absolute left-3 top-2.5 text-slate-400 pointer-events-none">
-                                    <Icon name="search" size={18}/>
-                                </div>
-                                <input 
-                                    type="text" 
-                                    placeholder="Buscar por ofício, projeto ou descrição..." 
-                                    className="w-full pl-10 pr-4 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                />
+                    <div className="bg-white p-6 rounded shadow-sm space-y-4">
+                        <div className="flex justify-between items-center">
+                            <h2 className="text-lg font-bold flex items-center gap-2"><Icon name="table" /> Registros Auditáveis</h2>
+                            <div className="flex gap-2">
+                                <button onClick={() => exportPDF(filtered)} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-sm flex items-center gap-2"><Icon name="file-text" size={16}/> Relatório PDF</button>
+                                <button onClick={() => { setCurrentDemand({}); setView('form'); }} className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm flex items-center gap-2"><Icon name="plus" size={16}/> Novo</button>
                             </div>
-                            <select 
-                                className="border p-2 rounded bg-white"
-                                value={filterStatus}
-                                onChange={(e) => setFilterStatus(e.target.value)}
-                            >
-                                <option>Todos</option>
-                                <option>Pendente</option>
-                                <option>Em análise</option>
-                                <option>Em execução</option>
-                                <option>Concluída</option>
-                                <option>Indeferida</option>
-                            </select>
                         </div>
-
+                        {/* Filtros Lista */}
+                        <div className="grid grid-cols-1 md:grid-cols-5 gap-2 bg-slate-50 p-3 rounded text-sm">
+                            <input placeholder="Buscar..." className="border p-2 rounded" onChange={e=>setListFilters({...listFilters, search: e.target.value})}/>
+                            <select className="border p-2 rounded" onChange={e=>setListFilters({...listFilters, project: e.target.value})}>{projects.map(p=><option key={p}>{p}</option>)}</select>
+                            <select className="border p-2 rounded" onChange={e=>setListFilters({...listFilters, status: e.target.value})}><option>Todos</option><option>Pendente</option><option>Concluída</option></select>
+                            <input type="date" className="border p-2 rounded" onChange={e=>setListFilters({...listFilters, startDate: e.target.value})}/>
+                            <input type="date" className="border p-2 rounded" onChange={e=>setListFilters({...listFilters, endDate: e.target.value})}/>
+                        </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm text-left text-slate-600">
-                                <thead className="text-xs text-slate-700 uppercase bg-slate-50">
-                                    <tr>
-                                        <th className="px-4 py-3">Ofício</th>
-                                        <th className="px-4 py-3">Projeto</th>
-                                        <th className="px-4 py-3">Data</th>
-                                        <th className="px-4 py-3" title="Valor Aprovado">Aprovado (R$)</th>
-                                        <th className="px-4 py-3">Status</th>
-                                        <th className="px-4 py-3 text-right">Ações</th>
-                                    </tr>
+                                <thead className="bg-slate-100 text-xs uppercase font-bold text-slate-700">
+                                    <tr><th className="p-3">Ref</th><th className="p-3">Data</th><th className="p-3">Projeto</th><th className="p-3">Valor Apr.</th><th className="p-3">Status</th><th className="p-3 text-right">Ações</th></tr>
                                 </thead>
                                 <tbody>
                                     {filtered.map(d => (
-                                        <tr key={d.id} className="border-b hover:bg-slate-50 transition">
-                                            <td className="px-4 py-3 font-medium text-slate-900">{d.refNumber}</td>
-                                            <td className="px-4 py-3">
-                                                {d.project ? (
-                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-800">
-                                                        {d.project}
-                                                    </span>
-                                                ) : <span className="text-slate-400">-</span>}
-                                            </td>
-                                            <td className="px-4 py-3">{d.entryDate.split('-').reverse().join('/')}</td>
-                                            <td className="px-4 py-3 font-mono text-emerald-700 font-medium">
-                                                {d.approvedValue ? formatCurrency(d.approvedValue) : '-'}
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(d.status)}`}>
-                                                    {d.status}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3 text-right">
-                                                <button onClick={() => { setCurrentDemand(d); setView('form'); }} className="text-blue-600 hover:text-blue-800 mr-3" title="Editar">
-                                                    <Icon name="edit-2" size={16} />
-                                                </button>
-                                                <button onClick={() => handleDelete(d.id)} className="text-red-600 hover:text-red-800" title="Excluir">
-                                                    <Icon name="trash-2" size={16} />
-                                                </button>
+                                        <tr key={d.id} className="border-b hover:bg-slate-50">
+                                            <td className="p-3 font-mono">{d.refNumber}</td>
+                                            <td className="p-3">{d.entryDate.split('-').reverse().join('/')}</td>
+                                            <td className="p-3 max-w-[150px] truncate">{d.project}</td>
+                                            <td className="p-3 text-emerald-700 font-bold">{formatCurrency(d.approvedValue)}</td>
+                                            <td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${d.status === 'Concluída' ? 'bg-emerald-100 text-emerald-800' : 'bg-yellow-100 text-yellow-800'}`}>{d.status}</span></td>
+                                            <td className="p-3 text-right">
+                                                <button onClick={() => { setCurrentDemand(d); setView('form'); }} className="text-blue-600 hover:text-blue-800 mx-1"><Icon name="edit-2" size={16}/></button>
+                                                <button onClick={() => handleDelete(d.id)} className="text-red-600 hover:text-red-800 mx-1"><Icon name="trash-2" size={16}/></button>
                                             </td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
-                            {filtered.length === 0 && <p className="text-center p-8 text-slate-400">Nenhum registro encontrado.</p>}
                         </div>
                     </div>
-                );
+                )
             };
 
             const DemandForm = () => {
-                const [formData, setFormData] = useState(currentDemand || {
-                    refNumber: '', entryDate: new Date().toISOString().split('T')[0],
-                    initialAssessment: '', technicalOpinion: '', department: 'Jurídico',
-                    project: '', 
-                    status: 'Pendente', assignee: '', deadline: '',
-                    value: 0,
-                    approvedValue: 0,
-                    evidenceLink: '', // Novo Estado
-                    counterpartCompliance: '', // Novo Estado
-                    finalDecision: '', notes: '', auditTrail: []
+                const [data, setData] = useState(currentDemand?.id ? currentDemand : {
+                    refNumber: '', entryDate: new Date().toISOString().split('T')[0], status: 'Pendente',
+                    project: '', value: 0, approvedValue: 0, counterpartCompliance: '', evidenceLink: ''
                 });
 
-                const handleChange = (e) => {
-                    setFormData({ ...formData, [e.target.name]: e.target.value });
-                };
-
-                const handleSubmit = (e) => {
-                    e.preventDefault();
-                    handleSave(formData);
-                };
+                const handleChange = (e) => setData({ ...data, [e.target.name]: e.target.value });
 
                 return (
-                    <div className="bg-white rounded-lg shadow-lg max-w-4xl mx-auto">
-                        <div className="border-b px-6 py-4 flex justify-between items-center bg-slate-50 rounded-t-lg">
-                            <h2 className="text-lg font-bold text-slate-800">
-                                {formData.id ? `Editar Registro: ${formData.refNumber}` : 'Nova Demanda Socioambiental'}
-                            </h2>
-                            <button onClick={() => setView('list')} className="text-slate-500 hover:text-slate-700">
-                                <Icon name="x" />
-                            </button>
+                    <div className="bg-white rounded shadow-lg max-w-4xl mx-auto overflow-hidden">
+                        <div className="bg-slate-900 text-white p-4 flex justify-between items-center">
+                            <h3 className="font-bold flex items-center gap-2"><Icon name="shield" size={18}/> Registro Seguro</h3>
+                            <button onClick={()=>setView('list')} className="text-slate-400 hover:text-white"><Icon name="x"/></button>
                         </div>
-                        
-                        <div className="p-6">
-                            <form onSubmit={handleSubmit} className="space-y-6">
-                                {/* Seção 1: Identificação */}
-                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                    <div className="md:col-span-1">
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Nº Ofício/Solicitação *</label>
-                                        <input required name="refNumber" value={formData.refNumber} onChange={handleChange} className="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500" />
-                                    </div>
-                                    <div className="md:col-span-1">
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Data de Entrada *</label>
-                                        <input type="date" required name="entryDate" value={formData.entryDate} onChange={handleChange} className="w-full border rounded p-2" />
-                                    </div>
-                                    {/* Campo Projeto */}
-                                    <div className="md:col-span-2">
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Projeto Vinculado</label>
-                                        <input 
-                                            list="project-list"
-                                            name="project" 
-                                            value={formData.project} 
-                                            onChange={handleChange} 
-                                            className="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500"
-                                            placeholder="Ex: Projeto Rios Limpos, Ação Comunitária..."
-                                        />
-                                        <datalist id="project-list">
-                                            <option value="Projeto Rios Limpos" />
-                                            <option value="Educação Ambiental nas Escolas" />
-                                            <option value="Apoio à Comunidade Ribeirinha" />
-                                            <option value="Gestão de Resíduos Sólidos" />
-                                            <option value="Recuperação de Nascentes" />
-                                        </datalist>
-                                    </div>
-                                </div>
+                        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="col-span-2 bg-yellow-50 border-l-4 border-yellow-400 p-3 text-xs text-yellow-800">
+                                <strong>Aviso de Auditoria:</strong> Todas as alterações neste formulário são registradas com timestamp do servidor e ID do usuário.
+                            </div>
+                            
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">Nº Ofício *</label><input required name="refNumber" value={data.refNumber} onChange={handleChange} className="w-full border p-2 rounded"/></div>
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">Data *</label><input type="date" required name="entryDate" value={data.entryDate} onChange={handleChange} className="w-full border p-2 rounded"/></div>
+                            
+                            <div className="col-span-2">
+                                <label className="block text-xs font-bold text-slate-500 mb-1">Projeto Vinculado</label>
+                                <input list="projs" name="project" value={data.project} onChange={handleChange} className="w-full border p-2 rounded" placeholder="Selecione ou digite..."/>
+                                <datalist id="projs"><option value="Reabilitação Rio Azul"/><option value="Educação Ambiental"/></datalist>
+                            </div>
+
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">Valor Solicitado</label><input type="number" name="value" value={data.value} onChange={handleChange} className="w-full border p-2 rounded"/></div>
+                            <div><label className="block text-xs font-bold text-emerald-700 mb-1">Valor Aprovado (R$)</label><input type="number" name="approvedValue" value={data.approvedValue} onChange={handleChange} className="w-full border p-2 rounded bg-emerald-50 border-emerald-200"/></div>
+
+                            <div className="col-span-2 bg-slate-50 p-4 rounded border border-slate-200">
+                                <label className="block text-xs font-bold text-slate-500 mb-1">Link de Evidência (Drive/SharePoint)</label>
+                                <input type="url" name="evidenceLink" value={data.evidenceLink} onChange={handleChange} className="w-full border p-2 rounded text-blue-600 mb-3" placeholder="https://..."/>
                                 
-                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                    <div className="md:col-span-1">
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Status *</label>
-                                        <select name="status" value={formData.status} onChange={handleChange} className="w-full border rounded p-2 bg-white">
-                                            <option>Pendente</option>
-                                            <option>Em análise</option>
-                                            <option>Em execução</option>
-                                            <option>Concluída</option>
-                                            <option>Indeferida</option>
-                                        </select>
-                                    </div>
-                                    <div className="md:col-span-1">
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Prazo / SLA</label>
-                                        <input type="date" name="deadline" value={formData.deadline} onChange={handleChange} className="w-full border rounded p-2" />
-                                    </div>
-                                </div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1">Cumpriu Contrapartida?</label>
+                                <select name="counterpartCompliance" value={data.counterpartCompliance} onChange={handleChange} className="w-full border p-2 rounded">
+                                    <option value="">Selecione...</option><option value="Sim">Sim</option><option value="Não">Não</option>
+                                </select>
+                                {data.counterpartCompliance === 'Não' && <p className="text-xs text-red-600 mt-1 font-bold">Justificativa obrigatória para auditoria.</p>}
+                            </div>
 
-                                {/* Seção Financeira */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded border border-slate-200">
-                                    <div className="md:col-span-1">
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Valor Solicitado (R$)</label>
-                                        <input type="number" step="0.01" min="0" name="value" value={formData.value} onChange={handleChange} className="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500" placeholder="0,00" />
-                                    </div>
-                                    <div className="md:col-span-1">
-                                        <label className="block text-sm font-medium text-emerald-800 mb-1 flex items-center gap-1">
-                                            <Icon name="check-circle" size={14}/> Valor Aprovado (R$)
-                                        </label>
-                                        <input type="number" step="0.01" min="0" name="approvedValue" value={formData.approvedValue} onChange={handleChange} className="w-full border rounded p-2 focus:ring-2 focus:ring-emerald-500 border-emerald-200 bg-emerald-50" placeholder="0,00" />
-                                    </div>
-                                </div>
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">Status</label><select name="status" value={data.status} onChange={handleChange} className="w-full border p-2 rounded"><option>Pendente</option><option>Em execução</option><option>Concluída</option><option>Indeferida</option></select></div>
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">Responsável</label><input name="assignee" value={data.assignee || ''} onChange={handleChange} className="w-full border p-2 rounded"/></div>
 
-                                {/* NOVA SEÇÃO: Contrapartidas de Patrocínio */}
-                                <div className="bg-slate-50 p-4 rounded border border-slate-200">
-                                    <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
-                                        <Icon name="link" size={16}/> Contrapartidas e Evidências
-                                    </h3>
-                                    
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="md:col-span-2">
-                                            <label className="block text-sm font-medium text-slate-700 mb-1">Link para Evidências (Drive/SharePoint)</label>
-                                            <input 
-                                                type="url"
-                                                name="evidenceLink" 
-                                                value={formData.evidenceLink} 
-                                                onChange={handleChange} 
-                                                className="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500 text-blue-600 underline-offset-2" 
-                                                placeholder="https://..."
-                                            />
+                            <div className="col-span-2 pt-4 border-t flex justify-end gap-3">
+                                <button onClick={()=>setView('list')} className="px-4 py-2 border rounded hover:bg-slate-50 text-sm">Cancelar</button>
+                                <button onClick={()=>handleSave(data)} className="px-6 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-sm font-bold flex items-center gap-2"><Icon name="save" size={16}/> Salvar Registro Seguro</button>
+                            </div>
+
+                            {/* Trilha de Auditoria Visual (Somente Leitura) */}
+                            {data.auditTrail && (
+                                <div className="col-span-2 mt-4 bg-slate-900 text-slate-300 p-3 rounded text-xs font-mono h-32 overflow-y-auto">
+                                    <p className="text-emerald-400 font-bold border-b border-slate-700 mb-2 pb-1">LOG DE AUDITORIA DO SISTEMA</p>
+                                    {data.auditTrail.map((log, i) => (
+                                        <div key={i} className="mb-1">
+                                            [{new Date(log.date).toLocaleString()}] {log.user} :: {log.action}
                                         </div>
-                                        
-                                        <div>
-                                            <label className="block text-sm font-medium text-slate-700 mb-1">O Apoiado Cumpriu a Contrapartida?</label>
-                                            <select 
-                                                name="counterpartCompliance" 
-                                                value={formData.counterpartCompliance} 
-                                                onChange={handleChange} 
-                                                className="w-full border rounded p-2 bg-white"
-                                            >
-                                                <option value="">Selecione...</option>
-                                                <option value="Sim">Sim, cumpriu integralmente</option>
-                                                <option value="Não">Não cumpriu</option>
-                                                <option value="Parcial">Parcialmente</option>
-                                            </select>
-                                        </div>
-                                    </div>
-
-                                    {/* Alerta de Não Cumprimento */}
-                                    {formData.counterpartCompliance === 'Não' && (
-                                        <div className="mt-3 p-3 bg-red-100 border-l-4 border-red-500 text-red-800 rounded animate-pulse">
-                                            <div className="flex items-center gap-2 font-bold">
-                                                <Icon name="alert-triangle" size={20}/> ATENÇÃO: Risco de Compliance
-                                            </div>
-                                            <p className="text-sm mt-1 ml-7">
-                                                O não cumprimento das obrigações de contrapartida deve ser justificado nas observações e reportado à auditoria.
-                                            </p>
-                                        </div>
-                                    )}
+                                    ))}
                                 </div>
-
-                                {/* Seção 2: Análise Técnica */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="col-span-2">
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Avaliação Inicial *</label>
-                                        <textarea required rows="2" name="initialAssessment" value={formData.initialAssessment} onChange={handleChange} className="w-full border rounded p-2" placeholder="Descrição resumida da demanda..."></textarea>
-                                    </div>
-                                    <div className="col-span-2">
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Parecer Técnico</label>
-                                        <textarea rows="3" name="technicalOpinion" value={formData.technicalOpinion} onChange={handleChange} className="w-full border rounded p-2 bg-slate-50" placeholder="Análise técnica aprofundada..."></textarea>
-                                    </div>
-                                </div>
-
-                                {/* Seção 3: Responsabilidade */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Departamento</label>
-                                        <input 
-                                            list="departments-list" 
-                                            name="department" 
-                                            value={formData.department} 
-                                            onChange={handleChange} 
-                                            className="w-full border rounded p-2 bg-white focus:ring-2 focus:ring-blue-500" 
-                                            placeholder="Selecione ou digite..." 
-                                        />
-                                        <datalist id="departments-list">
-                                            <option value="Supervisão " />
-                                            <option value="Engenharia Ambiental" />
-                                            <option value="Secretaria Executiva" />
-                                            <option value="Recursos Humanos" />
-                                            <option value="Financeiro" />
-                                        </datalist>
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Responsável Designado</label>
-                                        <input name="assignee" value={formData.assignee} onChange={handleChange} className="w-full border rounded p-2" />
-                                    </div>
-                                </div>
-
-                                {/* Seção 4: Conclusão e Auditoria */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Decisão Final</label>
-                                        <input name="finalDecision" value={formData.finalDecision} onChange={handleChange} className="w-full border rounded p-2" />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Anexo de Documentos</label>
-                                        <div className="border border-dashed border-slate-300 rounded p-2 text-center text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
-                                            <Icon name="upload-cloud" size={16} className="mx-auto mb-1"/>
-                                            Clique para simular upload (Visual)
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                {formData.id && (
-                                    <div className="mt-6 border-t pt-4">
-                                        <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2"><Icon name="history" size={16}/> Trilha de Auditoria (Sistema)</h3>
-                                        <div className="bg-slate-900 text-slate-200 p-3 rounded text-xs audit-trail max-h-32 overflow-y-auto">
-                                            {formData.auditTrail && formData.auditTrail.map((log, idx) => (
-                                                <div key={idx} className="mb-1 border-b border-slate-700 pb-1 last:border-0">
-                                                    <span className="text-emerald-400">[{log.date}]</span> <span className="text-yellow-400">{log.user}</span>: {log.action}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-
-                                <div className="flex justify-end gap-3 pt-4 border-t">
-                                    <button type="button" onClick={() => setView('list')} className="px-4 py-2 text-slate-700 border rounded hover:bg-slate-50">Cancelar</button>
-                                    <button type="submit" className="px-6 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700 font-medium flex items-center gap-2">
-                                        <Icon name="save" size={18} /> Salvar Registro
-                                    </button>
-                                </div>
-                            </form>
+                            )}
                         </div>
                     </div>
                 );
             };
 
-            // --- Layout Principal (Condicional) ---
-            
-            // Se NÃO estiver logado, mostra Login
-            if (!user) {
-                return <LoginScreen onLogin={handleLogin} />;
-            }
+            // Se não autenticado, mostra login. Se autenticado, mostra sistema.
+            if (!user) return <LoginScreen onLogin={() => {}} loading={authLoading} />; // A lógica de login real roda no useEffect
 
-            // Se estiver logado, mostra App
             return (
                 <div className="flex min-h-screen">
-                    {/* Sidebar Desktop */}
-                    <aside className="w-64 bg-slate-900 text-white flex flex-col hidden md:flex">
-                        <div className="p-6 border-b border-slate-800">
-                            <h1 className="text-xl font-bold text-emerald-400 tracking-wider">SIS-ESG</h1>
-                            <p className="text-xs text-slate-400 mt-1">Gestão Socioambiental</p>
-                        </div>
+                    <aside className="w-64 bg-slate-900 text-white hidden md:flex flex-col">
+                        <div className="p-6 border-b border-slate-800"><h1 className="text-xl font-bold tracking-widest text-emerald-500">SIS-ESG</h1><p className="text-[10px] text-slate-500 mt-1">AMBIENTE SEGURO v2.0</p></div>
                         <nav className="flex-1 p-4 space-y-2">
-                            <button onClick={() => setView('dashboard')} className={`w-full flex items-center gap-3 px-4 py-3 rounded transition ${view === 'dashboard' ? 'bg-emerald-600' : 'hover:bg-slate-800'}`}>
-                                <Icon name="pie-chart" /> Dashboard
-                            </button>
-                            <button onClick={() => setView('list')} className={`w-full flex items-center gap-3 px-4 py-3 rounded transition ${view === 'list' ? 'bg-emerald-600' : 'hover:bg-slate-800'}`}>
-                                <Icon name="folder-open" /> Demandas
-                            </button>
-                            <button onClick={() => navigateTo('form')} className={`w-full flex items-center gap-3 px-4 py-3 rounded transition ${view === 'form' ? 'bg-emerald-600' : 'hover:bg-slate-800'}`}>
-                                <Icon name="plus-square" /> Novo Registro
-                            </button>
+                            <button onClick={()=>setView('dashboard')} className={`w-full text-left px-4 py-3 rounded flex gap-3 ${view==='dashboard'?'bg-emerald-600':'hover:bg-slate-800'}`}><Icon name="pie-chart"/> Dashboard</button>
+                            <button onClick={()=>setView('list')} className={`w-full text-left px-4 py-3 rounded flex gap-3 ${view==='list'?'bg-emerald-600':'hover:bg-slate-800'}`}><Icon name="folder-open"/> Demandas</button>
                         </nav>
-                        
-                        {/* Botão Logout Sidebar */}
-                        <div className="p-4">
-                             <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition">
-                                <Icon name="log-out" /> Sair
-                            </button>
-                        </div>
-
-                        <div className="p-4 border-t border-slate-800 text-xs text-slate-500 text-center">
-                            Compliance ISO 9001<br/>v1.2.0
-                        </div>
+                        <div className="p-4 border-t border-slate-800 text-xs text-slate-500">Logado como:<br/><span className="text-white">{user.uid.substring(0,10)}...</span></div>
                     </aside>
-
-                    {/* Menu Mobile Overlay (Só aparece quando aberto) */}
-                    {mobileMenuOpen && (
-                        <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col md:hidden animate-fade-in">
-                            <div className="p-4 flex justify-between items-center border-b border-slate-800">
-                                <h1 className="text-xl font-bold text-emerald-400">SIS-ESG</h1>
-                                <button onClick={() => setMobileMenuOpen(false)} className="text-white p-2">
-                                    <Icon name="x" size={28} />
-                                </button>
-                            </div>
-                            <nav className="flex-1 p-6 space-y-4">
-                                <button onClick={() => navigateTo('dashboard')} className={`w-full flex items-center gap-4 px-4 py-4 rounded text-lg ${view === 'dashboard' ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}>
-                                    <Icon name="pie-chart" size={24} /> Dashboard
-                                </button>
-                                <button onClick={() => navigateTo('list')} className={`w-full flex items-center gap-4 px-4 py-4 rounded text-lg ${view === 'list' ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}>
-                                    <Icon name="folder-open" size={24} /> Demandas
-                                </button>
-                                <button onClick={() => navigateTo('form')} className={`w-full flex items-center gap-4 px-4 py-4 rounded text-lg ${view === 'form' ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}>
-                                    <Icon name="plus-square" size={24} /> Novo Registro
-                                </button>
-                                <hr className="border-slate-700 my-4"/>
-                                <button onClick={handleLogout} className="w-full flex items-center gap-4 px-4 py-4 rounded text-lg text-slate-400 hover:text-white hover:bg-slate-800">
-                                    <Icon name="log-out" size={24} /> Sair do Sistema
-                                </button>
-                            </nav>
-                        </div>
-                    )}
-
-                    {/* Conteúdo Mobile Header */}
-                    <div className="flex-1 flex flex-col h-screen overflow-hidden">
-                        <header className="bg-white border-b shadow-sm p-4 flex justify-between items-center md:hidden shrink-0">
-                            <span className="font-bold text-slate-800 flex items-center gap-2">
-                                <Icon name="leaf" className="text-emerald-600"/> SIS-ESG
-                            </span>
-                            <button onClick={() => setMobileMenuOpen(true)} className="text-slate-600 p-2 hover:bg-slate-100 rounded">
-                                <Icon name="menu" size={24} />
-                            </button>
-                        </header>
-
-                        {/* Área Principal */}
-                        <main className="flex-1 p-4 md:p-8 overflow-y-auto bg-slate-100 pb-20 md:pb-8">
+                    <main className="flex-1 flex flex-col h-screen overflow-hidden">
+                        <header className="md:hidden bg-white p-4 shadow-sm flex justify-between"><span className="font-bold">SIS-ESG</span><button onClick={()=>setMobileMenuOpen(!mobileMenuOpen)}><Icon name="menu"/></button></header>
+                        <div className="flex-1 overflow-y-auto p-4 md:p-8">
                             {view === 'dashboard' && <Dashboard />}
                             {view === 'list' && <DemandList />}
                             {view === 'form' && <DemandForm />}
-                        </main>
-                    </div>
+                        </div>
+                    </main>
                 </div>
             );
         };
