@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SISTEMA SIS-ESG | Registro de Demandas Blindado</title>
+    <title>SISTEMA SIS-ESG | Gestão Socioambiental Blindada</title>
     
     <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -18,7 +18,7 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
-    <!-- jsPDF & AutoTable -->
+    <!-- jsPDF & AutoTable para Exportação PDF -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 
@@ -36,6 +36,7 @@
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
         .audit-trail { font-family: 'Courier New', monospace; font-size: 0.75rem; }
         
+        /* Fundo da tela de Login */
         .login-bg {
             background-color: #0f172a;
             background-image: 
@@ -52,13 +53,19 @@
             animation: fade-in-up 0.5s ease-out forwards;
         }
 
-        /* Estilo para barras do gráfico */
+        /* Estilo para barras do gráfico CSS Puro */
         .bar-container { height: 180px; display: flex; align-items: flex-end; gap: 12px; padding-top: 20px; }
         .bar-wrapper { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; position: relative; }
         .bar { width: 100%; max-width: 40px; border-radius: 4px 4px 0 0; transition: height 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
         .bar:hover { filter: brightness(1.1); }
         .tooltip { opacity: 0; transition: opacity 0.2s; pointer-events: none; }
         .bar-wrapper:hover .tooltip { opacity: 1; }
+        
+        /* Scrollbar personalizada */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
     </style>
 </head>
 <body>
@@ -67,8 +74,8 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
 
-        // --- Configuração Segura e Inicialização do Firebase ---
-        // Em produção, estas variáveis viriam de variáveis de ambiente injetadas
+        // --- Configuração e Inicialização Segura do Firebase ---
+        // As variáveis abaixo são injetadas pelo ambiente ou definidas aqui para teste
         const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app';
         
@@ -79,7 +86,9 @@
             auth = window.Firebase.getAuth(app);
         }
 
-        // --- Componentes UI ---
+        // --- Componentes UI Auxiliares ---
+        
+        // Ícone seguro (evita conflito de DOM com Lucide/React)
         const Icon = ({ name, size = 20, className = "" }) => {
             const ref = useRef(null);
             useEffect(() => {
@@ -101,25 +110,30 @@
 
         const formatCurrency = (value) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
 
-        // --- Login Seguro ---
+        // --- Tela de Login ---
         const LoginScreen = ({ onLogin, loading }) => {
             return (
                 <div className="min-h-screen login-bg flex items-center justify-center p-4">
                     <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-fade-in-up">
                         <div className="p-8 pb-6 text-center border-b border-slate-100">
+                            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-100 mb-4 text-emerald-600">
+                                <Icon name="shield-check" size={32} />
+                            </div>
                             <h1 className="text-3xl font-bold text-slate-800 tracking-tight">SIS-ESG</h1>
-                            <p className="text-sm text-slate-500 mt-1">Gestão Socioambiental</p>
+                            <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider">Acesso Seguro & Auditado</p>
                         </div>
                         <div className="p-8 pt-6">
                             <button 
                                 onClick={onLogin} 
                                 disabled={loading}
-                                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-4 rounded-lg shadow-md transition flex items-center justify-center gap-3 disabled:opacity-70"
+                                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-4 rounded-lg shadow-lg hover:shadow-xl transition flex items-center justify-center gap-3 disabled:opacity-70"
                             >
-                                {loading ? <Icon name="loader-2" className="animate-spin" /> : <Icon name="log-in" />}
-                                {loading ? "Acessando..." : "Entrar no Sistema"}
+                                {loading ? <Icon name="loader-2" className="animate-spin" /> : <Icon name="lock" />}
+                                {loading ? "Estabelecendo Conexão Segura..." : "Autenticar no Sistema"}
                             </button>
-                            <p className="mt-6 text-center text-xs text-slate-400">Compliance ISO 9001 • v1.2.0</p>
+                            <p className="mt-6 text-center text-xs text-slate-400 leading-relaxed">
+                                Este sistema implementa criptografia de ponta a ponta e registra todas as operações para fins de auditoria ISO 9001 e Compliance.
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -134,16 +148,17 @@
             const [demands, setDemands] = useState([]);
             const [currentDemand, setCurrentDemand] = useState(null);
             const [authLoading, setAuthLoading] = useState(false);
+            
+            // Estado Global de Filtros (usado na lista e dashboard)
             const [listFilters, setListFilters] = useState({ status: 'Todos', project: 'Todos', startDate: '', endDate: '', search: '' });
 
-            // 1. Inicialização e Autenticação Segura
+            // 1. Inicialização e Autenticação
             useEffect(() => {
                 if (!auth) return;
                 
                 const initAuth = async () => {
                     setAuthLoading(true);
                     try {
-                        // Prioriza token customizado se disponível (ambiente seguro), senão anônimo (teste)
                         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                             await window.Firebase.signInWithCustomToken(auth, __initial_auth_token);
                         } else {
@@ -161,7 +176,7 @@
                 return window.Firebase.onAuthStateChanged(auth, (u) => setUser(u));
             }, []);
 
-            // 2. Listener de Dados em Tempo Real (Firestore)
+            // 2. Listener de Dados (Firestore)
             useEffect(() => {
                 if (!user || !db) return;
 
@@ -172,7 +187,7 @@
                     data.sort((a, b) => new Date(b.entryDate) - new Date(a.entryDate));
                     setDemands(data);
                 }, (error) => {
-                    console.error("Acesso negado ou erro de conexão:", error);
+                    console.error("Acesso negado:", error);
                 });
 
                 return () => unsubscribe();
@@ -183,6 +198,7 @@
             const handleSave = async (demand) => {
                 if (!user) return;
 
+                // Sanitização e Tipagem (Blindagem)
                 const cleanData = {
                     refNumber: String(demand.refNumber || '').trim(),
                     entryDate: demand.entryDate || new Date().toISOString().split('T')[0],
@@ -201,8 +217,9 @@
                     notes: String(demand.notes || ''),
                 };
 
+                // Objeto de Auditoria (Data cliente para visualização)
                 const auditEntry = {
-                    date: new Date().toISOString(), 
+                    date: new Date().toISOString(),
                     user: user.uid.substring(0, 8) + '...',
                     action: demand.id ? "Edição de Registro" : "Criação de Registro"
                 };
@@ -214,14 +231,14 @@
                         const docRef = window.Firebase.doc(db, 'artifacts', appId, 'public', 'data', 'esg_demands', demand.id);
                         await window.Firebase.updateDoc(docRef, {
                             ...cleanData,
-                            updatedAt: window.Firebase.serverTimestamp(), 
+                            updatedAt: window.Firebase.serverTimestamp(), // Timestamp seguro do servidor
                             auditTrail: window.Firebase.arrayUnion(auditEntry)
                         });
                     } else {
                         await window.Firebase.addDoc(collectionRef, {
                             ...cleanData,
-                            createdAt: window.Firebase.serverTimestamp(), 
-                            updatedAt: window.Firebase.serverTimestamp(), 
+                            createdAt: window.Firebase.serverTimestamp(),
+                            updatedAt: window.Firebase.serverTimestamp(),
                             auditTrail: [auditEntry]
                         });
                     }
@@ -246,32 +263,41 @@
             const exportPDF = (filteredData) => {
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF();
-                doc.setFontSize(18); doc.text("Relatório de Auditoria: Demandas ESG", 14, 22);
-                doc.setFontSize(10); doc.text(`Extraído em: ${new Date().toLocaleString()} | ID Usuário: ${user.uid}`, 14, 28);
+                
+                // Cabeçalho PDF
+                doc.setFontSize(18); doc.setTextColor(15, 23, 42);
+                doc.text("SIS-ESG: Relatório de Auditoria", 14, 22);
+                doc.setFontSize(10); doc.setTextColor(100);
+                doc.text(`Gerado em: ${new Date().toLocaleString()} | ID Usuário: ${user.uid}`, 14, 28);
                 doc.line(14, 32, 196, 32);
 
                 const tableRows = filteredData.map(d => [
-                    d.refNumber, d.entryDate.split('-').reverse().join('/'), 
-                    d.project, d.status, formatCurrency(d.approvedValue), 
-                    d.counterpartCompliance === 'Não' ? 'IRREGULAR' : 'OK'
+                    d.refNumber, 
+                    d.entryDate.split('-').reverse().join('/'), 
+                    d.project, 
+                    d.status, 
+                    formatCurrency(d.approvedValue), 
+                    d.counterpartCompliance === 'Não' ? 'IRREGULAR' : (d.counterpartCompliance || '-')
                 ]);
 
                 doc.autoTable({
                     head: [["Ofício", "Data", "Projeto", "Status", "Valor Apr.", "Compliance"]],
                     body: tableRows,
                     startY: 35,
-                    headStyles: { fillColor: [15, 23, 42] }, 
-                    alternateRowStyles: { fillColor: [241, 245, 249] } 
+                    headStyles: { fillColor: [16, 185, 129] }, // Emerald Green
+                    alternateRowStyles: { fillColor: [241, 245, 249] }, // Slate-100
+                    styles: { fontSize: 8 }
                 });
-                doc.save(`auditoria_esg_${new Date().getTime()}.pdf`);
+                doc.save(`auditoria_esg_${new Date().toISOString().split('T')[0]}.pdf`);
             };
 
-            // --- Sub-componentes ---
+            // --- Componentes de Visualização (Módulos) ---
             
             const Dashboard = () => {
                 const [filters, setFilters] = useState({ startDate: '', endDate: '', project: 'Todos', status: 'Todos' });
                 const projects = useMemo(() => ['Todos', ...new Set(demands.map(d => d.project || 'Não Identificado'))], [demands]);
 
+                // Lógica unificada de filtragem
                 const filtered = useMemo(() => demands.filter(d => {
                     const date = d.entryDate;
                     const matchStart = !filters.startDate || date >= filters.startDate;
@@ -281,7 +307,15 @@
                     return matchStart && matchEnd && matchProj && matchStatus;
                 }), [demands, filters]);
 
-                // Cálculo para Gráfico Mensal
+                // Dados para KPIs
+                const stats = {
+                    total: filtered.length,
+                    totalReq: filtered.reduce((a,b) => a + (b.value || 0), 0),
+                    totalApp: filtered.reduce((a,b) => a + (b.approvedValue || 0), 0),
+                    irregulars: filtered.filter(d => d.counterpartCompliance === 'Não')
+                };
+
+                // Gráfico Mensal (Evolução Financeira)
                 const monthlyData = useMemo(() => {
                     const data = {};
                     filtered.forEach(d => {
@@ -290,11 +324,11 @@
                         data[m].val += d.approvedValue || 0;
                         data[m].count++;
                     });
-                    return Object.keys(data).sort().map(k => ({ month: k, ...data[k] }));
+                    return Object.keys(data).sort().map(k => ({ month: k.split('-').reverse().join('/'), rawMonth: k, ...data[k] }));
                 }, [filtered]);
                 const maxVal = Math.max(...monthlyData.map(d => d.val), 1);
 
-                // Cálculo Ranking Financeiro de Projetos (Novo)
+                // Ranking Financeiro de Projetos
                 const projectRanking = useMemo(() => {
                     const ranking = {};
                     filtered.forEach(d => {
@@ -307,16 +341,8 @@
                         .map(([project, value]) => ({ project, value }));
                 }, [filtered]);
 
-                // Stats Dashboard Topo
-                const irregulars = filtered.filter(d => d.counterpartCompliance === 'Não');
-                const stats = {
-                    total: demands.length,
-                    totalReq: demands.reduce((a,b) => a + (b.value || 0), 0),
-                    totalApp: demands.reduce((a,b) => a + (b.approvedValue || 0), 0)
-                };
-                
-                // Ranking Projetos (Quantidade)
-                const projectCounts = demands.reduce((acc, curr) => {
+                // Ranking Projetos (Volume/Atendimentos)
+                const projectCounts = filtered.reduce((acc, curr) => {
                     const p = curr.project || 'Não Identificado';
                     acc[p] = (acc[p] || 0) + 1;
                     return acc;
@@ -329,129 +355,109 @@
                             <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
                                 <Icon name="layout-grid" size={24} /> Painel de Controle
                             </h2>
-                            <span className="text-sm text-slate-500">Olá, <span className="font-bold text-slate-700">{user.email ? user.email.split('@')[0] : 'visitante'}</span></span>
+                            <span className="text-sm text-slate-500">Usuário: <span className="font-bold text-slate-700">{user.email ? user.email.split('@')[0] : 'visitante'}</span></span>
                         </div>
 
-                        {/* KPI Cards Row - Cores Sólidas conforme imagem */}
+                        {/* Barra de Filtros Dashboard */}
+                        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                            <div><label className="text-xs font-bold text-slate-500 uppercase">Período</label><div className="flex gap-2"><input type="date" className="w-full border p-2 rounded text-sm" onChange={e=>setFilters({...filters, startDate: e.target.value})}/><input type="date" className="w-full border p-2 rounded text-sm" onChange={e=>setFilters({...filters, endDate: e.target.value})}/></div></div>
+                            <div><label className="text-xs font-bold text-slate-500 uppercase">Projeto</label><select className="w-full border p-2 rounded text-sm" onChange={e=>setFilters({...filters, project: e.target.value})}>{projects.map(p=><option key={p}>{p}</option>)}</select></div>
+                            <div><label className="text-xs font-bold text-slate-500 uppercase">Status</label><select className="w-full border p-2 rounded text-sm" onChange={e=>setFilters({...filters, status: e.target.value})}><option>Todos</option><option>Pendente</option><option>Em execução</option><option>Concluída</option></select></div>
+                            <button onClick={()=>setFilters({startDate:'', endDate:'', project:'Todos', status:'Todos'})} className="bg-slate-100 hover:bg-slate-200 text-slate-600 font-medium py-2 px-4 rounded text-sm transition">Limpar Filtros</button>
+                        </div>
+
+                        {/* KPIs Cards */}
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                            {/* Risco Card - Vermelho Sólido */}
-                            <div className="bg-red-500 rounded-lg p-6 text-white shadow-md relative overflow-hidden">
+                            {/* Risco (Vermelho Sólido) */}
+                            <div className="bg-red-600 rounded-xl p-6 text-white shadow-lg relative overflow-hidden transform hover:-translate-y-1 transition duration-300">
                                 <div className="relative z-10">
-                                    <div className="flex items-center gap-2 mb-2 opacity-90 font-semibold text-xs uppercase tracking-wider">
-                                        <Icon name="alert-triangle" size={14} /> Risco de Compliance
-                                    </div>
-                                    <div className="text-4xl font-bold mb-1">{irregulars.length}</div>
-                                    <div className="text-red-100 text-xs">Projetos sem contrapartida</div>
+                                    <div className="flex items-center gap-2 mb-2 font-semibold text-xs uppercase tracking-wider opacity-90"><Icon name="alert-triangle" size={14}/> Compliance</div>
+                                    <div className="text-4xl font-bold mb-1">{stats.irregulars.length}</div>
+                                    <div className="text-red-100 text-xs">Irregularidades</div>
                                 </div>
                             </div>
-
-                            {/* Total Solicitado - Azul Escuro Sólido */}
-                            <div className="bg-slate-800 rounded-lg p-6 text-white shadow-md">
+                            {/* Solicitado (Azul Escuro Sólido) */}
+                            <div className="bg-slate-800 rounded-xl p-6 text-white shadow-lg transform hover:-translate-y-1 transition duration-300">
                                 <div className="text-slate-400 text-xs font-bold uppercase mb-2">Total Solicitado</div>
                                 <div className="text-3xl font-bold">{formatCurrency(stats.totalReq)}</div>
                             </div>
-
-                            {/* Total Aprovado - Cinza/Azul Sólido */}
-                            <div className="bg-slate-700 rounded-lg p-6 text-white shadow-md">
+                            {/* Aprovado (Cinza Sólido) */}
+                            <div className="bg-slate-600 rounded-xl p-6 text-white shadow-lg transform hover:-translate-y-1 transition duration-300">
                                 <div className="text-slate-300 text-xs font-bold uppercase mb-2">Total Aprovado</div>
                                 <div className="text-3xl font-bold">{formatCurrency(stats.totalApp)}</div>
                             </div>
-
-                            {/* Total Demandas - Branco com borda azul */}
-                            <div className="bg-white rounded-lg p-6 text-slate-800 shadow-md border-l-4 border-blue-500">
-                                <div className="text-slate-500 text-xs font-bold uppercase mb-2">Total Demandas</div>
+                            {/* Total (Branco com borda) */}
+                            <div className="bg-white rounded-xl p-6 text-slate-800 shadow-lg border-l-8 border-blue-500 transform hover:-translate-y-1 transition duration-300">
+                                <div className="text-slate-500 text-xs font-bold uppercase mb-2">Demandas</div>
                                 <div className="text-4xl font-bold">{stats.total}</div>
                             </div>
                         </div>
 
-                        {/* Seção de Alerta - Fundo Vermelho Claro */}
-                        {irregulars.length > 0 && (
-                            <div className="bg-red-50 border border-red-100 rounded-xl p-6">
-                                <h3 className="text-lg font-bold text-red-700 mb-4 flex items-center gap-2">
-                                    <Icon name="alert-circle" /> Projetos com Contrapartida Pendente (Ação Necessária)
-                                </h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {irregulars.map(d => (
-                                        <div key={d.id} className="bg-white p-5 rounded-lg shadow-sm flex flex-col justify-between h-full border border-red-50">
-                                            <div>
-                                                <h4 className="font-bold text-slate-800 mb-1">{d.project}</h4>
-                                                <div className="flex justify-between items-center text-xs text-slate-500 mb-3">
-                                                    <span className="bg-slate-100 px-2 py-1 rounded">{d.refNumber}</span>
-                                                    <span>{d.entryDate.split('-').reverse().join('/')}</span>
-                                                </div>
-                                                <p className="text-xs text-slate-600 italic mb-4 line-clamp-2">"{d.initialAssessment}"</p>
-                                            </div>
-                                            <button 
-                                                onClick={() => { setCurrentDemand(d); setView('form'); }}
-                                                className="w-full py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 transition text-sm font-medium flex items-center justify-center gap-2"
-                                            >
-                                                Regularizar <Icon name="arrow-right" size={14} />
-                                            </button>
+                        {/* Alerta de Risco (Vermelho Claro) */}
+                        {stats.irregulars.length > 0 && (
+                            <div className="bg-red-50 border border-red-200 rounded-xl p-6 shadow-sm animate-pulse">
+                                <h3 className="text-lg font-bold text-red-800 mb-4 flex items-center gap-2"><Icon name="alert-octagon"/> Ação Necessária: Projetos Irregulares</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    {stats.irregulars.map(d => (
+                                        <div key={d.id} className="bg-white p-4 rounded-lg shadow-sm border-l-4 border-red-500">
+                                            <h4 className="font-bold text-slate-800 text-sm truncate">{d.project}</h4>
+                                            <p className="text-xs text-slate-500 mb-2">{d.refNumber}</p>
+                                            <button onClick={() => { setCurrentDemand(d); setView('form'); }} className="w-full py-1.5 bg-red-100 text-red-700 rounded text-xs font-bold hover:bg-red-200 transition">Regularizar</button>
                                         </div>
                                     ))}
                                 </div>
                             </div>
                         )}
 
-                        {/* Bottom Row */}
+                        {/* Linha de Gráficos e Rankings */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             
-                            {/* Projetos Mais Atendidos */}
-                            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-                                <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
-                                    <Icon name="package" className="text-emerald-600" /> Projetos Mais Atendidos
-                                </h3>
-                                <div className="space-y-3">
-                                    {topProjects.length > 0 ? topProjects.map(([proj, count], idx) => (
-                                        <div key={idx} className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-sm">
-                                                    {idx + 1}
+                            {/* Gráfico Evolução Mensal */}
+                            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex flex-col">
+                                <h3 className="text-sm font-bold text-slate-700 mb-6 flex items-center gap-2"><Icon name="bar-chart-2" className="text-blue-600"/> Evolução Mensal (Volume Financeiro)</h3>
+                                {monthlyData.length > 0 ? (
+                                    <div className="bar-container border-b border-slate-200 mt-auto">
+                                        {monthlyData.map(d => (
+                                            <div key={d.month} className="bar-wrapper group">
+                                                <div className="tooltip absolute -top-12 bg-slate-800 text-white text-xs p-2 rounded shadow-lg z-20 whitespace-nowrap">
+                                                    <span className="font-bold">{formatCurrency(d.val)}</span><br/>{d.count} demandas
                                                 </div>
-                                                <span className="text-slate-700 font-medium">{proj}</span>
+                                                <div className="bar bg-blue-500 group-hover:bg-blue-600" style={{height: `${(d.val/maxVal)*100}%`, minHeight: '4px'}}></div>
+                                                <div className="text-[10px] text-slate-500 mt-2 font-medium">{d.month.substring(0,5)}</div>
                                             </div>
-                                            <span className="text-sm font-semibold text-slate-600">{count} {count === 1 ? 'demanda' : 'demandas'}</span>
-                                        </div>
-                                    )) : <p className="text-slate-400 text-center text-sm">Nenhum dado.</p>}
-                                </div>
+                                        ))}
+                                    </div>
+                                ) : <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">Sem dados no período.</div>}
                             </div>
 
-                            {/* Ranking Financeiro (Novo Módulo - Adicionado conforme pedido anterior, mantido) */}
-                            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-                                <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
-                                    <Icon name="trending-up" className="text-emerald-600"/> Ranking Financeiro
-                                </h3>
-                                <div className="space-y-3 max-h-64 overflow-y-auto pr-2">
-                                    {projectRanking.length > 0 ? projectRanking.map((item, idx) => (
-                                        <div key={idx} className="flex items-center justify-between p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition">
-                                            <div className="flex items-center gap-3">
-                                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${idx < 3 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>
-                                                    {idx + 1}
+                            {/* Rankings (Tabbed Layout Visual) */}
+                            <div className="space-y-6">
+                                {/* Ranking Financeiro */}
+                                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                                    <h3 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2"><Icon name="trending-up" className="text-emerald-600"/> Ranking Financeiro (Top Projetos)</h3>
+                                    <div className="space-y-3 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+                                        {projectRanking.length > 0 ? projectRanking.map((item, idx) => (
+                                            <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition">
+                                                <div className="flex items-center gap-3">
+                                                    <span className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold ${idx<3?'bg-emerald-100 text-emerald-800':'bg-slate-200 text-slate-600'}`}>{idx+1}</span>
+                                                    <span className="text-sm font-medium text-slate-700 truncate max-w-[180px]" title={item.project}>{item.project}</span>
                                                 </div>
-                                                <span className="text-sm font-medium text-slate-700 truncate max-w-[150px] md:max-w-[200px]" title={item.project}>{item.project}</span>
+                                                <span className="text-sm font-bold text-emerald-700">{formatCurrency(item.value)}</span>
                                             </div>
-                                            <span className="text-sm font-bold text-emerald-700">{formatCurrency(item.value)}</span>
-                                        </div>
-                                    )) : (
-                                        <p className="text-slate-400 text-sm text-center py-8">Nenhum projeto com aporte registrado.</p>
-                                    )}
+                                        )) : <p className="text-slate-400 text-xs text-center">Nenhum dado.</p>}
+                                    </div>
                                 </div>
-                            </div>
 
-                            {/* Ações Rápidas */}
-                            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 col-span-1 lg:col-span-2">
-                                <h3 className="text-lg font-bold text-slate-800 mb-6">Ações Rápidas</h3>
-                                <div className="space-y-4">
-                                    <button onClick={() => { setCurrentDemand(null); setView('form'); }} className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium flex items-center justify-center gap-2 shadow-sm transition">
-                                        <Icon name="plus-circle" size={20} /> Nova Demanda
-                                    </button>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <button onClick={() => setView('list')} className="py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium flex items-center justify-center gap-2 transition">
-                                            <Icon name="list" size={18} /> Ver Lista
-                                        </button>
-                                        <button onClick={() => exportPDF(demands)} className="py-4 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg font-medium flex items-center justify-center gap-2 transition">
-                                            <Icon name="file-text" size={18} /> Relatório PDF
-                                        </button>
+                                {/* Projetos Mais Atendidos */}
+                                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                                    <h3 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2"><Icon name="package" className="text-purple-600"/> Projetos Mais Atendidos (Volume)</h3>
+                                    <div className="space-y-3 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+                                        {topProjects.length > 0 ? topProjects.map(([proj, count], idx) => (
+                                            <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                                                <span className="text-sm font-medium text-slate-700 truncate max-w-[200px]">{proj}</span>
+                                                <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full font-bold">{count}</span>
+                                            </div>
+                                        )) : <p className="text-slate-400 text-xs text-center">Nenhum dado.</p>}
                                     </div>
                                 </div>
                             </div>
@@ -461,8 +467,8 @@
             };
 
             const DemandList = () => {
-                // Filtros da Lista (Cópia da lógica para brevidade, mas independente)
                 const projects = useMemo(() => ['Todos', ...new Set(demands.map(d => d.project || 'Não Identificado'))], [demands]);
+                
                 const filtered = useMemo(() => demands.filter(d => {
                     const matchSearch = d.refNumber.toLowerCase().includes(listFilters.search.toLowerCase());
                     const matchProj = listFilters.project === 'Todos' || d.project === listFilters.project;
@@ -476,39 +482,44 @@
                     <div className="space-y-6 animate-fade-in">
                         <div className="flex justify-between items-center">
                             <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Icon name="folder-open" /> Demandas</h2>
-                            <button onClick={() => { setCurrentDemand(null); setView('form'); }} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 flex items-center gap-2">
-                                <Icon name="plus" size={16} /> Novo Registro
-                            </button>
+                            <div className="flex gap-2">
+                                <button onClick={() => exportPDF(filtered)} className="bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition">
+                                    <Icon name="file-text" size={16} /> Exportar PDF
+                                </button>
+                                <button onClick={() => { setCurrentDemand(null); setView('form'); }} className="bg-blue-600 text-white hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition">
+                                    <Icon name="plus" size={16} /> Novo Registro
+                                </button>
+                            </div>
                         </div>
 
-                        {/* Filtros Lista - Com data final */}
-                        <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200 grid grid-cols-1 md:grid-cols-5 gap-4">
+                        {/* Filtros Avançados Lista */}
+                        <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 grid grid-cols-1 md:grid-cols-5 gap-4">
                             <div className="md:col-span-2 relative">
                                 <Icon name="search" size={16} className="absolute left-3 top-3 text-slate-400" />
-                                <input placeholder="Buscar por ofício..." className="w-full pl-9 p-2 border rounded-md text-sm" onChange={e => setListFilters({...listFilters, search: e.target.value})} />
+                                <input placeholder="Buscar por ofício..." className="w-full pl-9 p-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" onChange={e => setListFilters({...listFilters, search: e.target.value})} />
                             </div>
-                            <select className="w-full p-2 border rounded-md text-sm" onChange={e => setListFilters({...listFilters, project: e.target.value})}>
-                                <option value="Todos">Todos os Projetos</option>
+                            <select className="w-full p-2 border border-slate-300 rounded-lg text-sm bg-white" onChange={e => setListFilters({...listFilters, project: e.target.value})}>
                                 {projects.map(p => <option key={p} value={p}>{p}</option>)}
                             </select>
-                            <select className="w-full p-2 border rounded-md text-sm" onChange={e => setListFilters({...listFilters, status: e.target.value})}>
-                                <option value="Todos">Todos Status</option>
-                                <option>Pendente</option><option>Em execução</option><option>Concluída</option>
+                            <select className="w-full p-2 border border-slate-300 rounded-lg text-sm bg-white" onChange={e => setListFilters({...listFilters, status: e.target.value})}>
+                                <option value="Todos">Status</option>
+                                <option>Pendente</option><option>Em execução</option><option>Concluída</option><option>Indeferida</option>
                             </select>
                             <div className="flex gap-2">
-                                <input type="date" className="w-full p-2 border rounded-md text-sm" onChange={e => setListFilters({...listFilters, startDate: e.target.value})} />
-                                <input type="date" className="w-full p-2 border rounded-md text-sm" onChange={e => setListFilters({...listFilters, endDate: e.target.value})} />
+                                <input type="date" title="De" className="w-full p-2 border border-slate-300 rounded-lg text-sm" onChange={e => setListFilters({...listFilters, startDate: e.target.value})} />
+                                <input type="date" title="Até" className="w-full p-2 border border-slate-300 rounded-lg text-sm" onChange={e => setListFilters({...listFilters, endDate: e.target.value})} />
                             </div>
                         </div>
 
-                        <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                             <table className="w-full text-sm text-left">
-                                <thead className="bg-slate-50 text-slate-500 font-semibold uppercase text-xs">
+                                <thead className="bg-slate-50 text-slate-500 font-semibold uppercase text-xs border-b border-slate-200">
                                     <tr>
                                         <th className="p-4">Ref</th>
                                         <th className="p-4">Projeto</th>
                                         <th className="p-4">Status</th>
                                         <th className="p-4">Valor Apr.</th>
+                                        <th className="p-4 text-center">Compliance</th>
                                         <th className="p-4 text-right">Ações</th>
                                     </tr>
                                 </thead>
@@ -516,15 +527,21 @@
                                     {filtered.map(d => (
                                         <tr key={d.id} className="hover:bg-slate-50 transition">
                                             <td className="p-4 font-medium text-slate-900">{d.refNumber}</td>
-                                            <td className="p-4 text-slate-600">{d.project}</td>
-                                            <td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${d.status === 'Concluída' ? 'bg-emerald-100 text-emerald-700' : 'bg-yellow-100 text-yellow-700'}`}>{d.status}</span></td>
+                                            <td className="p-4 text-slate-600 truncate max-w-[200px]" title={d.project}>{d.project}</td>
+                                            <td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${d.status === 'Concluída' ? 'bg-emerald-100 text-emerald-700' : d.status === 'Indeferida' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{d.status}</span></td>
                                             <td className="p-4 font-mono text-slate-700">{formatCurrency(d.approvedValue)}</td>
+                                            <td className="p-4 text-center">
+                                                {d.counterpartCompliance === 'Não' 
+                                                    ? <span className="text-red-600 font-bold text-xs bg-red-50 px-2 py-1 rounded border border-red-200">ALERTA</span> 
+                                                    : <Icon name="check-circle" size={16} className="text-emerald-500 mx-auto"/>}
+                                            </td>
                                             <td className="p-4 text-right">
-                                                <button onClick={() => { setCurrentDemand(d); setView('form'); }} className="text-blue-600 hover:text-blue-800"><Icon name="edit-2" size={16} /></button>
+                                                <button onClick={() => { setCurrentDemand(d); setView('form'); }} className="text-blue-600 hover:text-blue-800 p-1 hover:bg-blue-50 rounded transition"><Icon name="edit-2" size={16} /></button>
+                                                <button onClick={() => handleDelete(d.id)} className="text-red-600 hover:text-red-800 p-1 hover:bg-red-50 rounded transition ml-2"><Icon name="trash-2" size={16} /></button>
                                             </td>
                                         </tr>
                                     ))}
-                                    {filtered.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-slate-400">Nenhum registro encontrado.</td></tr>}
+                                    {filtered.length === 0 && <tr><td colSpan="6" className="p-10 text-center text-slate-400">Nenhum registro encontrado.</td></tr>}
                                 </tbody>
                             </table>
                         </div>
@@ -535,89 +552,88 @@
             const DemandForm = () => {
                 const [data, setData] = useState(currentDemand?.id ? currentDemand : {
                     refNumber: '', entryDate: new Date().toISOString().split('T')[0], status: 'Pendente',
-                    project: '', value: 0, approvedValue: 0, counterpartCompliance: '', evidenceLink: '', department: 'Jurídico'
+                    project: '', value: 0, approvedValue: 0, counterpartCompliance: '', evidenceLink: '', department: 'Jurídico',
+                    initialAssessment: '', auditTrail: []
                 });
 
                 const handleChange = (e) => setData({ ...data, [e.target.name]: e.target.value });
 
                 return (
-                    <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden animate-fade-in">
-                        <div className="bg-white border-b border-slate-100 p-6 flex justify-between items-center">
-                            <h2 className="text-xl font-bold text-slate-800">{data.id ? 'Editar Demanda' : 'Novo Registro'}</h2>
-                            <button onClick={() => setView('list')} className="text-slate-400 hover:text-slate-600"><Icon name="x" /></button>
+                    <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden animate-fade-in mb-10">
+                        <div className="bg-slate-900 text-white p-6 flex justify-between items-center">
+                            <div>
+                                <h2 className="text-xl font-bold flex items-center gap-2"><Icon name="shield" size={20}/> {data.id ? 'Editar Registro Auditado' : 'Novo Registro Seguro'}</h2>
+                                <p className="text-xs text-slate-400 mt-1">Todas as alterações são registradas com timestamp do servidor.</p>
+                            </div>
+                            <button onClick={() => setView('list')} className="text-slate-400 hover:text-white transition"><Icon name="x" /></button>
                         </div>
+                        
                         <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Número do Ofício</label>
-                                <input name="refNumber" value={data.refNumber} onChange={handleChange} className="w-full border-slate-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border" placeholder="EX: OF-001/2025" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Data de Entrada</label>
-                                <input type="date" name="entryDate" value={data.entryDate} onChange={handleChange} className="w-full border-slate-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border" />
-                            </div>
+                            {/* Identificação */}
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">Nº Ofício *</label><input required name="refNumber" value={data.refNumber} onChange={handleChange} className="w-full border-slate-300 rounded-md p-2.5 border focus:ring-2 focus:ring-blue-500 outline-none" /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">Data de Entrada *</label><input type="date" name="entryDate" value={data.entryDate} onChange={handleChange} className="w-full border-slate-300 rounded-md p-2.5 border focus:ring-2 focus:ring-blue-500 outline-none" /></div>
                             
-                            {/* Departamento - Agora com estilo limpo */}
+                            {/* Classificação */}
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Departamento</label>
-                                <input list="dept-options" name="department" value={data.department} onChange={handleChange} className="w-full border-slate-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border" placeholder="Selecione..." />
-                                <datalist id="dept-options">
-                                    <option value="Jurídico" />
-                                    <option value="Engenharia Ambiental" />
-                                    <option value="Responsabilidade Social" />
-                                    <option value="Diretoria" />
-                                </datalist>
+                                <label className="block text-xs font-bold text-slate-500 mb-1">Departamento</label>
+                                <input list="dept-options" name="department" value={data.department} onChange={handleChange} className="w-full border-slate-300 rounded-md p-2.5 border" placeholder="Selecione..." />
+                                <datalist id="dept-options"><option value="Jurídico" /><option value="Engenharia Ambiental" /><option value="Responsabilidade Social" /><option value="Diretoria" /></datalist>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1">Projeto Vinculado</label>
+                                <input list="proj-options" name="project" value={data.project} onChange={handleChange} className="w-full border-slate-300 rounded-md p-2.5 border" placeholder="Vincular Projeto..." />
+                                <datalist id="proj-options"><option value="Projeto Rios Limpos" /><option value="Educação Ambiental" /><option value="Apoio Comunitário" /></datalist>
                             </div>
 
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Projeto</label>
-                                <input list="proj-options" name="project" value={data.project} onChange={handleChange} className="w-full border-slate-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border" placeholder="Vincular Projeto..." />
-                                <datalist id="proj-options">
-                                    <option value="Projeto Rios Limpos" />
-                                    <option value="Educação Ambiental" />
-                                    <option value="Apoio Comunitário" />
-                                </datalist>
-                            </div>
-
+                            {/* Financeiro */}
                             <div className="col-span-1 md:col-span-2 bg-slate-50 p-6 rounded-lg border border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-600 mb-1">Valor Solicitado (R$)</label>
-                                    <input type="number" name="value" value={data.value} onChange={handleChange} className="w-full border-slate-300 rounded-md p-2 border" />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-emerald-700 mb-1">Valor Aprovado (R$)</label>
-                                    <input type="number" name="approvedValue" value={data.approvedValue} onChange={handleChange} className="w-full border-emerald-300 bg-emerald-50 rounded-md p-2 border text-emerald-800 font-bold" />
-                                </div>
+                                <div><label className="block text-xs font-bold text-slate-500 mb-1">Valor Solicitado (R$)</label><input type="number" name="value" value={data.value} onChange={handleChange} className="w-full border-slate-300 rounded-md p-2.5 border" /></div>
+                                <div><label className="block text-xs font-bold text-emerald-700 mb-1">Valor Aprovado (R$)</label><input type="number" name="approvedValue" value={data.approvedValue} onChange={handleChange} className="w-full border-emerald-300 bg-emerald-50 rounded-md p-2.5 border text-emerald-800 font-bold" /></div>
                                 
+                                {/* Compliance Section */}
                                 <div className="md:col-span-2 border-t border-slate-200 pt-4 mt-2">
-                                    <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2"><Icon name="check-square" size={16}/> Compliance de Contrapartida</h4>
+                                    <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2"><Icon name="check-square" size={16} className="text-blue-600"/> Compliance de Contrapartida</h4>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-xs text-slate-500 mb-1">Link de Evidência</label>
-                                            <input name="evidenceLink" value={data.evidenceLink} onChange={handleChange} className="w-full border-slate-300 rounded p-2 border text-sm text-blue-600" placeholder="https://drive..." />
-                                        </div>
+                                        <div><label className="block text-xs text-slate-500 mb-1">Link de Evidência</label><input name="evidenceLink" value={data.evidenceLink} onChange={handleChange} className="w-full border-slate-300 rounded p-2 border text-sm text-blue-600 underline" placeholder="https://..." /></div>
                                         <div>
                                             <label className="block text-xs text-slate-500 mb-1">Obrigação Cumprida?</label>
-                                            <select name="counterpartCompliance" value={data.counterpartCompliance} onChange={handleChange} className="w-full border-slate-300 rounded p-2 border text-sm">
-                                                <option value="">Selecione...</option>
-                                                <option value="Sim">Sim</option>
-                                                <option value="Não">Não (Gerar Alerta)</option>
+                                            <select name="counterpartCompliance" value={data.counterpartCompliance} onChange={handleChange} className={`w-full border rounded p-2 text-sm ${data.counterpartCompliance === 'Não' ? 'border-red-500 bg-red-50 text-red-700 font-bold' : 'border-slate-300'}`}>
+                                                <option value="">Selecione...</option><option value="Sim">Sim</option><option value="Não">Não (Gerar Alerta)</option>
                                             </select>
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
+                            {/* Detalhes */}
                             <div className="col-span-1 md:col-span-2">
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Avaliação Inicial</label>
-                                <textarea name="initialAssessment" rows="3" value={data.initialAssessment} onChange={handleChange} className="w-full border-slate-300 rounded-md p-2 border"></textarea>
+                                <label className="block text-xs font-bold text-slate-500 mb-1">Avaliação Inicial</label>
+                                <textarea name="initialAssessment" rows="3" value={data.initialAssessment} onChange={handleChange} className="w-full border-slate-300 rounded-md p-2.5 border focus:ring-2 focus:ring-blue-500"></textarea>
                             </div>
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">Status</label><select name="status" value={data.status} onChange={handleChange} className="w-full border-slate-300 rounded-md p-2.5 border"><option>Pendente</option><option>Em execução</option><option>Concluída</option><option>Indeferida</option></select></div>
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">Responsável</label><input name="assignee" value={data.assignee || ''} onChange={handleChange} className="w-full border-slate-300 rounded-md p-2.5 border"/></div>
 
-                            <div className="col-span-1 md:col-span-2 flex justify-end gap-3 pt-4 border-t border-slate-100">
-                                <button onClick={() => setView('list')} className="px-6 py-3 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 font-medium">Cancelar</button>
-                                <button onClick={() => handleSave(data)} className="px-8 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-bold shadow-lg flex items-center gap-2">
+                            {/* Botões */}
+                            <div className="col-span-1 md:col-span-2 flex justify-end gap-3 pt-6 border-t border-slate-100">
+                                <button onClick={() => setView('list')} className="px-6 py-3 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 font-medium transition">Cancelar</button>
+                                <button onClick={() => handleSave(data)} className="px-8 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-bold shadow-lg flex items-center gap-2 transition transform hover:-translate-y-0.5">
                                     <Icon name="save" size={18} /> Salvar Registro
                                 </button>
                             </div>
+
+                            {/* Trilha de Auditoria (Visual) */}
+                            {data.auditTrail && data.auditTrail.length > 0 && (
+                                <div className="col-span-1 md:col-span-2 mt-4 bg-slate-900 rounded-lg p-4 text-slate-300 text-xs font-mono">
+                                    <h5 className="text-emerald-500 font-bold border-b border-slate-700 pb-2 mb-2 flex items-center gap-2"><Icon name="history" size={12}/> LOG DE AUDITORIA</h5>
+                                    <div className="max-h-32 overflow-y-auto space-y-1 custom-scrollbar">
+                                        {data.auditTrail.map((log, i) => (
+                                            <div key={i}>
+                                                <span className="text-slate-500">[{new Date(log.date).toLocaleString()}]</span> <span className="text-emerald-200">{log.user}</span>: {log.action}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 );
@@ -627,40 +643,40 @@
 
             return (
                 <div className="flex min-h-screen">
-                    {/* Sidebar estilizado conforme imagem */}
-                    <aside className="w-64 bg-[#0f172a] text-white flex-col hidden md:flex">
-                        <div className="p-6">
-                            <h1 className="text-2xl font-bold text-emerald-500 tracking-wide">SIS-ESG</h1>
-                            <p className="text-xs text-slate-400 mt-1">Gestão Socioambiental</p>
+                    {/* Sidebar Dark com destaque Verde */}
+                    <aside className="w-72 bg-[#0f172a] text-white flex-col hidden md:flex shadow-2xl z-20">
+                        <div className="p-8">
+                            <h1 className="text-2xl font-bold text-emerald-500 tracking-wide flex items-center gap-2"><Icon name="leaf" /> SIS-ESG</h1>
+                            <p className="text-xs text-slate-400 mt-1 ml-8">Gestão Socioambiental</p>
                         </div>
-                        <nav className="flex-1 px-4 py-4 space-y-1">
-                            <button onClick={() => setView('dashboard')} className={`w-full flex items-center gap-3 px-4 py-3 rounded transition-colors ${view === 'dashboard' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                        <nav className="flex-1 px-4 space-y-2">
+                            <button onClick={() => setView('dashboard')} className={`w-full flex items-center gap-4 px-4 py-4 rounded-xl transition-all duration-200 ${view === 'dashboard' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
                                 <Icon name="layout-dashboard" size={20} /> <span className="font-medium">Dashboard</span>
                             </button>
-                            <button onClick={() => setView('list')} className={`w-full flex items-center gap-3 px-4 py-3 rounded transition-colors ${view === 'list' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                            <button onClick={() => setView('list')} className={`w-full flex items-center gap-4 px-4 py-4 rounded-xl transition-all duration-200 ${view === 'list' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
                                 <Icon name="folder-open" size={20} /> <span className="font-medium">Demandas</span>
                             </button>
-                            <button onClick={() => { setCurrentDemand(null); setView('form'); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded transition-colors ${view === 'form' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                            <button onClick={() => { setCurrentDemand(null); setView('form'); }} className={`w-full flex items-center gap-4 px-4 py-4 rounded-xl transition-all duration-200 ${view === 'form' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
                                 <Icon name="plus-square" size={20} /> <span className="font-medium">Novo Registro</span>
                             </button>
                         </nav>
                         <div className="p-6 border-t border-slate-800">
-                            <button className="flex items-center gap-3 text-slate-400 hover:text-white transition">
+                            <button className="flex items-center gap-3 text-slate-400 hover:text-red-400 transition w-full px-4 py-2">
                                 <Icon name="log-out" size={20} /> Sair
                             </button>
-                            <p className="text-xs text-slate-600 mt-6 text-center">Compliance ISO 9001<br/>v1.2.0</p>
+                            <p className="text-[10px] text-slate-600 mt-6 text-center uppercase tracking-widest">Sistema Blindado v2.0</p>
                         </div>
                     </aside>
 
-                    <div className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-50">
-                        {/* Mobile Header */}
-                        <header className="bg-[#0f172a] text-white p-4 flex justify-between items-center md:hidden shrink-0 shadow-md">
-                            <span className="font-bold text-emerald-500">SIS-ESG</span>
+                    <div className="flex-1 flex flex-col h-screen overflow-hidden bg-[#f1f5f9]">
+                        {/* Header Mobile */}
+                        <header className="bg-[#0f172a] text-white p-4 flex justify-between items-center md:hidden shrink-0 shadow-md z-30">
+                            <span className="font-bold text-emerald-500 flex items-center gap-2"><Icon name="leaf" size={18}/> SIS-ESG</span>
                             <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)}><Icon name="menu" /></button>
                         </header>
 
-                        {/* Content Area */}
-                        <main className="flex-1 p-6 md:p-10 overflow-y-auto">
+                        {/* Área Principal */}
+                        <main className="flex-1 p-6 md:p-10 overflow-y-auto custom-scrollbar">
                             {view === 'dashboard' && <Dashboard />}
                             {view === 'list' && <DemandList />}
                             {view === 'form' && <DemandForm />}
